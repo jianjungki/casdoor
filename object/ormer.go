@@ -100,15 +100,31 @@ func InitAdapter() {
 		}
 	}
 
+	driverName := conf.GetConfigString("driverName")
+	dataSourceName := conf.GetConfigDataSourceName()
+	dbName := conf.GetConfigString("dbName")
+
+	// Print database connection info for debugging
+	host := util.GetValueFromDataSourceName("host", dataSourceName)
+	port := util.GetValueFromDataSourceName("port", dataSourceName)
+	user := util.GetValueFromDataSourceName("user", dataSourceName)
+	schema := util.GetValueFromDataSourceName("search_path", dataSourceName)
+
+	if schema == "" {
+		fmt.Printf("DB CONNECTION: driver=%s, host=%s, port=%s, user=%s, dbname=%s, schema=public (default)\n", driverName, host, port, user, dbName)
+	} else {
+		fmt.Printf("DB CONNECTION: driver=%s, host=%s, port=%s, user=%s, dbname=%s, schema=%s\n", driverName, host, port, user, dbName, schema)
+	}
+
 	if createDatabase {
-		err := createDatabaseForPostgres(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName(), conf.GetConfigString("dbName"))
+		err := createDatabaseForPostgres(driverName, dataSourceName, dbName)
 		if err != nil {
 			panic(err)
 		}
 	}
 
 	var err error
-	ormer, err = NewAdapter(conf.GetConfigString("driverName"), conf.GetConfigDataSourceName(), conf.GetConfigString("dbName"))
+	ormer, err = NewAdapter(driverName, dataSourceName, dbName)
 	if err != nil {
 		panic(err)
 	}
