@@ -175,7 +175,9 @@ func addSyncerJob(syncer *Syncer) error {
 	cron := getCronMap(id)
 	_, err = cron.AddFunc(schedule, func() {
 		runSyncerWithTimeout(syncer, "cron", func() error {
-			syncer.syncUsers()
+			if err := syncer.syncUsers(); err != nil {
+				return err
+			}
 			return syncer.syncGroups()
 		})
 	})
