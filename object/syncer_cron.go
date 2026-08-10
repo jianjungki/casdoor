@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/casdoor/casdoor/util"
 	"github.com/robfig/cron/v3"
 )
 
@@ -98,6 +99,12 @@ func runSyncerWithTimeout(syncer *Syncer, kind string, fn func() error) {
 	}
 	defer mu.Unlock()
 
+	startedAt := time.Now()
+	fmt.Printf("[syncer: %s] %s started\n", id, kind)
+	defer func() {
+		fmt.Printf("[syncer: %s] %s finished in %s\n", id, kind, time.Since(startedAt).Round(time.Millisecond))
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), defaultSyncTimeout)
 	defer cancel()
 
@@ -123,6 +130,16 @@ func runSyncerWithTimeout(syncer *Syncer, kind string, fn func() error) {
 	}
 }
 
+// runSyncerAsync queues a syncer run and returns immediately. The existing
+// per-syncer mutex in runSyncerWithTimeout prevents duplicate runs when an API
+// request, an initial run, and a cron tick happen at the same time.
+func runSyncerAsync(syncer *Syncer, kind string, fn func() error) {
+	fmt.Printf("[syncer: %s] %s queued\n", syncerID(syncer), kind)
+	util.SafeGoroutine(func() {
+		runSyncerWithTimeout(syncer, kind, fn)
+	})
+}
+
 func addSyncerJob(syncer *Syncer) error {
 	id := syncerID(syncer)
 	if id == "/" {
@@ -140,11 +157,12 @@ func addSyncerJob(syncer *Syncer) error {
 		return err
 	}
 
-	// Run an initial sync before scheduling the recurring job. runSyncerWithTimeout
-	// does not return an error (it logs internally), so a transient upstream
-	// failure here cannot prevent the recurring job from being scheduled.
-	runSyncerWithTimeout(syncer, "initial", func() error {
-		syncer.syncUsers()
+	// Queue the initial sync instead of blocking the add/update HTTP request.
+	// Errors are logged by runSyncerWithTimeout and do not prevent scheduling.
+	runSyncerAsync(syncer, "initial", func() error {
+		if err := syncer.syncUsers(); err != nil {
+			return err
+		}
 		return syncer.syncGroups()
 	})
 

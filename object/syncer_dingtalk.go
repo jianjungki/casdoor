@@ -124,6 +124,9 @@ type DingtalkDeptDetailResp struct {
 
 // getDingtalkAccessToken gets access token from DingTalk API
 func (p *DingtalkSyncerProvider) getDingtalkAccessToken() (string, error) {
+	startedAt := time.Now()
+	fmt.Printf("[syncer: %s/%s][DingTalk] calling gettoken\n", p.Syncer.Owner, p.Syncer.Name)
+
 	// syncer.User should be the appKey
 	// syncer.Password should be the appSecret
 	appKey := p.Syncer.User
@@ -170,6 +173,7 @@ func (p *DingtalkSyncerProvider) getDingtalkAccessToken() (string, error) {
 			tokenResp.Errcode, tokenResp.Errmsg)
 	}
 
+	fmt.Printf("[syncer: %s/%s][DingTalk] gettoken succeeded in %s, expiresIn=%ds\n", p.Syncer.Owner, p.Syncer.Name, time.Since(startedAt).Round(time.Millisecond), tokenResp.ExpiresIn)
 	return tokenResp.AccessToken, nil
 }
 
@@ -180,6 +184,8 @@ func (p *DingtalkSyncerProvider) getDingtalkDepartments(accessToken string) ([]i
 
 // getDingtalkDepartmentsRecursive recursively fetches all departments starting from parentDeptId
 func (p *DingtalkSyncerProvider) getDingtalkDepartmentsRecursive(accessToken string, parentDeptId int64) ([]int64, error) {
+	startedAt := time.Now()
+	fmt.Printf("[syncer: %s/%s][DingTalk] calling department/listsub, parentDeptId=%d\n", p.Syncer.Owner, p.Syncer.Name, parentDeptId)
 	apiUrl := fmt.Sprintf("https://oapi.dingtalk.com/topapi/v2/department/listsub?access_token=%s",
 		url.QueryEscape(accessToken))
 
@@ -202,6 +208,7 @@ func (p *DingtalkSyncerProvider) getDingtalkDepartmentsRecursive(accessToken str
 		return nil, fmt.Errorf("failed to get departments: errcode=%d, errmsg=%s",
 			deptResp.Errcode, deptResp.Errmsg)
 	}
+	fmt.Printf("[syncer: %s/%s][DingTalk] department/listsub succeeded in %s, parentDeptId=%d, children=%d\n", p.Syncer.Owner, p.Syncer.Name, time.Since(startedAt).Round(time.Millisecond), parentDeptId, len(deptResp.Result))
 
 	// Start with the parent department itself
 	deptIds := []int64{parentDeptId}
@@ -250,8 +257,10 @@ func (p *DingtalkSyncerProvider) getDingtalkDepartmentDetails(accessToken string
 func (p *DingtalkSyncerProvider) getDingtalkUsersFromDept(accessToken string, deptId int64) ([]*DingtalkUser, error) {
 	allUsers := []*DingtalkUser{}
 	cursor := int64(0)
+	startedAt := time.Now()
 
 	for {
+		fmt.Printf("[syncer: %s/%s][DingTalk] calling user/listsimple, deptId=%d, cursor=%d\n", p.Syncer.Owner, p.Syncer.Name, deptId, cursor)
 		apiUrl := fmt.Sprintf("https://oapi.dingtalk.com/topapi/user/listsimple?access_token=%s",
 			url.QueryEscape(accessToken))
 
@@ -279,6 +288,7 @@ func (p *DingtalkSyncerProvider) getDingtalkUsersFromDept(accessToken string, de
 
 		if userResp.Result != nil {
 			allUsers = append(allUsers, userResp.Result.List...)
+			fmt.Printf("[syncer: %s/%s][DingTalk] user/listsimple page received, deptId=%d, count=%d, accumulated=%d, hasMore=%t\n", p.Syncer.Owner, p.Syncer.Name, deptId, len(userResp.Result.List), len(allUsers), userResp.Result.HasMore)
 
 			if !userResp.Result.HasMore {
 				break
@@ -289,6 +299,7 @@ func (p *DingtalkSyncerProvider) getDingtalkUsersFromDept(accessToken string, de
 		}
 	}
 
+	fmt.Printf("[syncer: %s/%s][DingTalk] users for department completed in %s, deptId=%d, total=%d\n", p.Syncer.Owner, p.Syncer.Name, time.Since(startedAt).Round(time.Millisecond), deptId, len(allUsers))
 	return allUsers, nil
 }
 
@@ -359,6 +370,9 @@ func (p *DingtalkSyncerProvider) postJSON(url string, data map[string]interface{
 
 // getDingtalkUsers gets all users from DingTalk API
 func (p *DingtalkSyncerProvider) getDingtalkUsers() ([]*OriginalUser, error) {
+	startedAt := time.Now()
+	fmt.Printf("[syncer: %s/%s][DingTalk] user synchronization fetch started\n", p.Syncer.Owner, p.Syncer.Name)
+
 	// Get access token
 	accessToken, err := p.getDingtalkAccessToken()
 	if err != nil {
@@ -370,6 +384,7 @@ func (p *DingtalkSyncerProvider) getDingtalkUsers() ([]*OriginalUser, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("[syncer: %s/%s][DingTalk] department tree fetched, departments=%d\n", p.Syncer.Owner, p.Syncer.Name, len(deptIds))
 
 	// Get users from all departments (deduplicate by userid)
 	userMap := make(map[string]*DingtalkUser)
@@ -401,6 +416,7 @@ func (p *DingtalkSyncerProvider) getDingtalkUsers() ([]*OriginalUser, error) {
 		originalUsers = append(originalUsers, originalUser)
 	}
 
+	fmt.Printf("[syncer: %s/%s][DingTalk] user synchronization fetch completed in %s, departments=%d, uniqueUsers=%d\n", p.Syncer.Owner, p.Syncer.Name, time.Since(startedAt).Round(time.Millisecond), len(deptIds), len(originalUsers))
 	return originalUsers, nil
 }
 
@@ -476,6 +492,9 @@ func (p *DingtalkSyncerProvider) dingtalkUserToOriginalUser(dingtalkUser *Dingta
 
 // GetOriginalGroups retrieves all groups (departments) from DingTalk
 func (p *DingtalkSyncerProvider) GetOriginalGroups() ([]*OriginalGroup, error) {
+	startedAt := time.Now()
+	fmt.Printf("[syncer: %s/%s][DingTalk] group synchronization fetch started\n", p.Syncer.Owner, p.Syncer.Name)
+
 	// Get access token
 	accessToken, err := p.getDingtalkAccessToken()
 	if err != nil {
@@ -502,6 +521,7 @@ func (p *DingtalkSyncerProvider) GetOriginalGroups() ([]*OriginalGroup, error) {
 		originalGroups = append(originalGroups, originalGroup)
 	}
 
+	fmt.Printf("[syncer: %s/%s][DingTalk] group synchronization fetch completed in %s, departments=%d, groups=%d\n", p.Syncer.Owner, p.Syncer.Name, time.Since(startedAt).Round(time.Millisecond), len(deptIds), len(originalGroups))
 	return originalGroups, nil
 }
 

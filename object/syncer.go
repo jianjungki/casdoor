@@ -335,6 +335,17 @@ func RunSyncer(syncer *Syncer) error {
 	return syncer.syncUsers()
 }
 
+// RunSyncerAsync queues a manual sync and returns immediately so the HTTP
+// request is not held open while communicating with the upstream system.
+func RunSyncerAsync(syncer *Syncer) {
+	runSyncerAsync(syncer, "manual", func() error {
+		if err := syncer.initAdapter(); err != nil {
+			return err
+		}
+		return syncer.syncUsers()
+	})
+}
+
 func TestSyncer(syncer Syncer) error {
 	oldSyncer, err := getSyncer(syncer.Owner, syncer.Name)
 	if err != nil {

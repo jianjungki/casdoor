@@ -187,12 +187,7 @@ func (c *ApiController) RunSyncer() {
 		return
 	}
 
-	err = object.RunSyncer(syncer)
-	if err != nil {
-		c.ResponseError(err.Error())
-		return
-	}
-
+	object.RunSyncerAsync(syncer)
 	c.ResponseOk()
 }
 
