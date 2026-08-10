@@ -21,9 +21,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/casdoor/casdoor/util"
+)
+
+const (
+	dingtalkMaxRetries     = 5
+	dingtalkRetryBaseDelay = time.Second
 )
 
 // DingtalkSyncerProvider implements SyncerProvider for DingTalk API-based syncers
@@ -143,22 +149,7 @@ func (p *DingtalkSyncerProvider) getDingtalkAccessToken() (string, error) {
 	apiUrl := fmt.Sprintf("https://oapi.dingtalk.com/gettoken?appkey=%s&appsecret=%s",
 		url.QueryEscape(appKey), url.QueryEscape(appSecret))
 
-	ctx, cancel := syncerHttpContext()
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
-	if err != nil {
-		return "", err
-	}
-
-	client := newSyncerHttpClient()
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, err := io.ReadAll(resp.Body)
+	data, err := p.doDingtalkRequest("gettoken", http.MethodGet, apiUrl, nil)
 	if err != nil {
 		return "", err
 	}
@@ -194,7 +185,7 @@ func (p *DingtalkSyncerProvider) getDingtalkDepartmentsRecursive(accessToken str
 		"dept_id": parentDeptId,
 	}
 
-	data, err := p.postJSON(apiUrl, postData)
+	data, err := p.postJSON("department/listsub", apiUrl, postData)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +226,7 @@ func (p *DingtalkSyncerProvider) getDingtalkDepartmentDetails(accessToken string
 		"dept_id": deptId,
 	}
 
-	data, err := p.postJSON(apiUrl, postData)
+	data, err := p.postJSON("department/get", apiUrl, postData)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +262,7 @@ func (p *DingtalkSyncerProvider) getDingtalkUsersFromDept(accessToken string, de
 			"size":    100,
 		}
 
-		data, err := p.postJSON(apiUrl, postData)
+		data, err := p.postJSON("user/listsimple", apiUrl, postData)
 		if err != nil {
 			return nil, err
 		}
@@ -313,7 +304,7 @@ func (p *DingtalkSyncerProvider) getDingtalkUserDetails(accessToken string, user
 		"userid": userId,
 	}
 
-	data, err := p.postJSON(apiUrl, postData)
+	data, err := p.postJSON("user/get", apiUrl, postData)
 	if err != nil {
 		return nil, err
 	}
@@ -337,36 +328,116 @@ func (p *DingtalkSyncerProvider) getDingtalkUserDetails(accessToken string, user
 	return resp.Result, nil
 }
 
-// postJSON sends a POST request with JSON body
-func (p *DingtalkSyncerProvider) postJSON(url string, data map[string]interface{}) ([]byte, error) {
+// postJSON sends a POST request with JSON body.
+func (p *DingtalkSyncerProvider) postJSON(apiName string, endpoint string, data map[string]interface{}) ([]byte, error) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := syncerHttpContext()
-	defer cancel()
+	return p.doDingtalkRequest(apiName, http.MethodPost, endpoint, jsonData)
+}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
+// doDingtalkRequest retries transient network, HTTP, and DingTalk throttling
+// failures. Every attempt gets a fresh request body and timeout context.
+func (p *DingtalkSyncerProvider) doDingtalkRequest(apiName string, method string, endpoint string, body []byte) ([]byte, error) {
 	client := newSyncerHttpClient()
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	var lastErr error
 
-	respData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	for attempt := 0; attempt <= dingtalkMaxRetries; attempt++ {
+		ctx, cancel := syncerHttpContext()
+		req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("DingTalk %s request creation failed: %w", apiName, err)
+		}
+		if method == http.MethodPost {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, requestErr := client.Do(req)
+		if requestErr != nil {
+			cancel()
+			lastErr = fmt.Errorf("DingTalk %s request failed: %s", apiName, safeDingtalkNetworkError(requestErr))
+			if attempt < dingtalkMaxRetries {
+				p.logDingtalkRetry(apiName, attempt+1, lastErr.Error())
+				time.Sleep(dingtalkRetryDelay(attempt))
+				continue
+			}
+			return nil, lastErr
+		}
+
+		respData, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		cancel()
+		if readErr != nil {
+			lastErr = fmt.Errorf("DingTalk %s response read failed: %s", apiName, safeDingtalkNetworkError(readErr))
+			if attempt < dingtalkMaxRetries {
+				p.logDingtalkRetry(apiName, attempt+1, lastErr.Error())
+				time.Sleep(dingtalkRetryDelay(attempt))
+				continue
+			}
+			return nil, lastErr
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+			lastErr = fmt.Errorf("DingTalk %s returned retryable HTTP status %d", apiName, resp.StatusCode)
+			if attempt < dingtalkMaxRetries {
+				p.logDingtalkRetry(apiName, attempt+1, lastErr.Error())
+				time.Sleep(dingtalkRetryDelay(attempt))
+				continue
+			}
+			return nil, lastErr
+		}
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			return nil, fmt.Errorf("DingTalk %s returned HTTP status %d", apiName, resp.StatusCode)
+		}
+
+		if isDingtalkThrottleResponse(respData) && attempt < dingtalkMaxRetries {
+			lastErr = fmt.Errorf("DingTalk %s was throttled", apiName)
+			p.logDingtalkRetry(apiName, attempt+1, lastErr.Error())
+			time.Sleep(dingtalkRetryDelay(attempt))
+			continue
+		}
+
+		return respData, nil
 	}
 
-	return respData, nil
+	return nil, lastErr
+}
+
+func (p *DingtalkSyncerProvider) logDingtalkRetry(apiName string, retry int, reason string) {
+	delay := dingtalkRetryDelay(retry - 1)
+	fmt.Printf("[syncer: %s/%s][DingTalk] %s retry %d/%d in %s, reason=%s\n",
+		p.Syncer.Owner, p.Syncer.Name, apiName, retry, dingtalkMaxRetries, delay, reason)
+}
+
+func dingtalkRetryDelay(retry int) time.Duration {
+	return dingtalkRetryBaseDelay * time.Duration(1<<retry)
+}
+
+func safeDingtalkNetworkError(err error) string {
+	if urlErr, ok := err.(*url.Error); ok && urlErr.Err != nil {
+		return urlErr.Err.Error()
+	}
+	return err.Error()
+}
+
+func isDingtalkThrottleResponse(data []byte) bool {
+	var response struct {
+		Errcode int             `json:"errcode"`
+		SubCode json.RawMessage `json:"sub_code"`
+		Subcode json.RawMessage `json:"subcode"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return false
+	}
+
+	subCode := strings.Trim(string(response.SubCode), `"`)
+	if subCode == "" {
+		subCode = strings.Trim(string(response.Subcode), `"`)
+	}
+	return response.Errcode == 88 || subCode == "90002"
 }
 
 // getDingtalkUsers gets all users from DingTalk API
