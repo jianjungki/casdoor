@@ -16,6 +16,7 @@ package object
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -45,8 +46,16 @@ func (syncer *Syncer) createGroupFromOriginalGroup(originalGroup *OriginalGroup)
 	return group
 }
 
-func (syncer *Syncer) syncGroups() error {
-	fmt.Printf("Running syncGroups()..\n")
+func (syncer *Syncer) syncGroups() (err error) {
+	start := time.Now()
+	fmt.Printf("[syncer: %s/%s] syncGroups() started\n", syncer.Owner, syncer.Name)
+	defer func() {
+		status := "OK"
+		if err != nil {
+			status = fmt.Sprintf("ERROR: %v", err)
+		}
+		fmt.Printf("[syncer: %s/%s] syncGroups() finished in %s, status=%s\n", syncer.Owner, syncer.Name, time.Since(start).Round(time.Millisecond), status)
+	}()
 
 	// Get existing groups from Casdoor
 	groups, err := GetGroups(syncer.Organization)
@@ -70,7 +79,7 @@ func (syncer *Syncer) syncGroups() error {
 		return err
 	}
 
-	fmt.Printf("Groups: %d, oGroups: %d\n", len(groups), len(oGroups))
+	fmt.Printf("[syncer: %s/%s] local groups=%d, upstream groups=%d\n", syncer.Owner, syncer.Name, len(groups), len(oGroups))
 
 	// Create a map of existing groups by name
 	myGroups := map[string]*Group{}

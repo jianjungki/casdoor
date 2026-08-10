@@ -16,13 +16,11 @@ package object
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -141,7 +139,7 @@ func (p *DingtalkSyncerProvider) getDingtalkAccessToken() (string, error) {
 	apiUrl := fmt.Sprintf("https://oapi.dingtalk.com/gettoken?appkey=%s&appsecret=%s",
 		url.QueryEscape(appKey), url.QueryEscape(appSecret))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
@@ -149,7 +147,7 @@ func (p *DingtalkSyncerProvider) getDingtalkAccessToken() (string, error) {
 		return "", err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -334,7 +332,7 @@ func (p *DingtalkSyncerProvider) postJSON(url string, data map[string]interface{
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
@@ -344,7 +342,7 @@ func (p *DingtalkSyncerProvider) postJSON(url string, data map[string]interface{
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

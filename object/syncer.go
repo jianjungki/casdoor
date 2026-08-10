@@ -60,6 +60,7 @@ type Syncer struct {
 	AvatarBaseUrl    string         `xorm:"varchar(100)" json:"avatarBaseUrl"`
 	ErrorText        string         `xorm:"mediumtext" json:"errorText"`
 	SyncInterval     int            `json:"syncInterval"`
+	LastSync         string         `xorm:"varchar(100)" json:"lastSync"`
 	IsReadOnly       bool           `json:"isReadOnly"`
 	IsEnabled        bool           `json:"isEnabled"`
 
@@ -231,6 +232,16 @@ func updateSyncerErrorText(syncer *Syncer, line string) (bool, error) {
 	}
 
 	return affected != 0, nil
+}
+
+// updateSyncerLastSync records the last successful sync time on the syncer so
+// operators can detect a syncer that silently stopped syncing by querying
+// stale "last_sync" values.
+func updateSyncerLastSync(syncer *Syncer) error {
+	_, err := ormer.Engine.ID(core.PK{syncer.Owner, syncer.Name}).Cols("last_sync").Update(&Syncer{
+		LastSync: util.GetCurrentTime(),
+	})
+	return err
 }
 
 func AddSyncer(syncer *Syncer) (bool, error) {

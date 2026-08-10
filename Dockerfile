@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:20.20.1 AS FRONT
+FROM node:20.20.1 AS FRONT
 WORKDIR /web
 
 # Copy only dependency files first for better caching
@@ -9,7 +9,12 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000
 COPY ./web .
 RUN NODE_OPTIONS="--max-old-space-size=4096" yarn run build
 
-FROM --platform=$BUILDPLATFORM golang:1.25.8 AS BACK
+FROM golang:1.25.8 AS BACK
+# GOPROXY to avoid timeouts when fetching Go packages during the build.
+# It can be overridden at build time with:
+#   docker build --build-arg GOPROXY=https://proxy.golang.org,direct ...
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=$GOPROXY
 WORKDIR /go/src/casdoor
 
 # Copy only go.mod and go.sum first for dependency caching

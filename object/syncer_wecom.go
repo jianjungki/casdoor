@@ -15,13 +15,11 @@
 package object
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -105,7 +103,7 @@ func (p *WecomSyncerProvider) getWecomAccessToken() (string, error) {
 	apiUrl := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=%s&corpsecret=%s",
 		url.QueryEscape(p.Syncer.User), url.QueryEscape(p.Syncer.Password))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
@@ -113,7 +111,7 @@ func (p *WecomSyncerProvider) getWecomAccessToken() (string, error) {
 		return "", err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -144,7 +142,7 @@ func (p *WecomSyncerProvider) getWecomDepartments(accessToken string) ([]int, er
 	apiUrl := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/department/list?access_token=%s",
 		url.QueryEscape(accessToken))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
@@ -152,7 +150,7 @@ func (p *WecomSyncerProvider) getWecomDepartments(accessToken string) ([]int, er
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -188,7 +186,7 @@ func (p *WecomSyncerProvider) getWecomUsersFromDept(accessToken string, deptId i
 	apiUrl := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/user/list?access_token=%s&department_id=%d",
 		url.QueryEscape(accessToken), deptId)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
@@ -196,7 +194,7 @@ func (p *WecomSyncerProvider) getWecomUsersFromDept(accessToken string, deptId i
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

@@ -71,30 +71,24 @@ func (db *Database) getCanalConfig() *canal.Config {
 	cfg.Addr = fmt.Sprintf("%s:%d", db.host, db.port)
 	cfg.Password = db.password
 	cfg.User = db.username
-	// We only care table in database1
+	// We only care table in database
 	cfg.Dump.TableDB = db.database
 	return cfg
 }
 
-func (db *Database) startCanal(targetDb *Database) error {
+// startCanal creates a binlog replication client from db to targetDb.
+// It only configures the client and registers the event handler; the caller
+// (runCanalWithRetry) is responsible for calling Run() and reconnecting with
+// backoff when the binlog stream breaks.
+func (db *Database) startCanal(targetDb *Database) (*canal.Canal, error) {
 	canalConfig := db.getCanalConfig()
 	c, err := canal.NewCanal(canalConfig)
 	if err != nil {
-		return err
-	}
-
-	gtidSet, err := c.GetMasterGTIDSet()
-	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Register a handler to handle RowsEvent
 	c.SetEventHandler(targetDb)
 
-	// Start replication
-	err = c.StartFromGTID(gtidSet)
-	if err != nil {
-		return err
-	}
-	return nil
+	return c, nil
 }

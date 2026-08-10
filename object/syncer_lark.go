@@ -16,12 +16,10 @@ package object
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -262,7 +260,7 @@ func (p *LarkSyncerProvider) postJSON(url string, data interface{}) ([]byte, err
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
@@ -272,7 +270,7 @@ func (p *LarkSyncerProvider) postJSON(url string, data interface{}) ([]byte, err
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -289,7 +287,7 @@ func (p *LarkSyncerProvider) postJSON(url string, data interface{}) ([]byte, err
 
 // getWithAuth sends a GET request with authorization header
 func (p *LarkSyncerProvider) getWithAuth(url string, accessToken string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -300,7 +298,7 @@ func (p *LarkSyncerProvider) getWithAuth(url string, accessToken string) ([]byte
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

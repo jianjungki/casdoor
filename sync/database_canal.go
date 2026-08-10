@@ -22,32 +22,96 @@ import (
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/go-mysql-org/go-mysql/replication"
 	"github.com/siddontang/go-log/log"
+	"github.com/xorm-io/xorm/core"
 )
 
 func (db *Database) OnGTID(header *replication.EventHeader, gtid mysql.GTIDSet) error {
-	log.Info("OnGTID: ", gtid.String())
 	db.Gtid = gtid.String()
 	return nil
 }
 
 func (db *Database) onDDL(header *replication.EventHeader, nextPos mysql.Position, queryEvent *replication.QueryEvent) error {
-	log.Info("into DDL event")
 	return nil
 }
 
-func (db *Database) OnRow(e *canal.RowsEvent) error {
-	if e.Header != nil {
-		log.Info("serverId: ", e.Header.ServerID)
-	} else {
-		log.Info("serverId: e.Header == nil")
+// setGtidNext pins GTID_NEXT on the given tx so the writes applied on the
+// target library carry the source GTID, which prevents loopback (the same
+// event being re-applied back-and-forth between the two instances).
+func (db *Database) setGtidNext(tx *core.Tx) error {
+	if db.Gtid == "" {
+		return nil
+	}
+	_, err := tx.Exec(fmt.Sprintf("SET GTID_NEXT= '%s'", db.Gtid))
+	return err
+}
+
+func (db *Database) resetGtidNext(tx *core.Tx) error {
+	_, err := tx.Exec("SET GTID_NEXT='automatic'")
+	return err
+}
+
+// runInTx executes fn inside a single transaction pinned to one connection.
+// This is critical because SET GTID_NEXT is connection-scoped: running it and
+// the writes on different pooled connections would silently drop the
+// loopback-protection pinning.
+//
+// If fn returns an error, the transaction is rolled back so a failed batch
+// cannot leak an open transaction (which previously stalled later events and
+// looked like a "sync timeout").
+func (db *Database) runInTx(setGtid bool, fn func(tx *core.Tx) error) error {
+	tx, err := db.engine.DB().Begin()
+	if err != nil {
+		return err
 	}
 
+	if setGtid {
+		if err := db.setGtidNext(tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+
+	if err := fn(tx); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	if setGtid {
+		if err := db.resetGtidNext(tx); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// fmtValue renders a binlog cell value into the SQL argument representation.
+// It preserves NULL properly and avoids the previous "%!d(<nil>)" corruption.
+func fmtValue(item interface{}, isChar bool) interface{} {
+	if item == nil {
+		return nil
+	}
+	if isChar {
+		return fmt.Sprintf("%v", item)
+	}
+	switch v := item.(type) {
+	case []byte:
+		// NUM columns from go-mysql are already decoded, but guard anyway.
+		return string(v)
+	default:
+		return v
+	}
+}
+
+func (db *Database) OnRow(e *canal.RowsEvent) error {
+	// Loopback protection: if the current GTID already originates from this
+	// instance, the corresponding change was written by us and must NOT be
+	// re-applied, otherwise the two instances would ping-pong forever.
 	if strings.Contains(db.Gtid, db.serverUuid) {
 		return nil
 	}
 
-	// Set the next gtid of the target library to the gtid of the current target library to avoid loopbacks
-	db.engine.Exec(fmt.Sprintf("SET GTID_NEXT= '%s'", db.Gtid))
 	length := len(e.Table.Columns)
 	columnNames := make([]string, length)
 	oldColumnValue := make([]interface{}, length)
@@ -56,117 +120,83 @@ func (db *Database) OnRow(e *canal.RowsEvent) error {
 
 	for i, col := range e.Table.Columns {
 		columnNames[i] = col.Name
-		if col.Type <= 2 {
-			isChar[i] = false
-		} else {
-			isChar[i] = true
-		}
+		isChar[i] = col.Type > 2
 	}
+
 	// get pk column name
 	pkColumnNames := getPkColumnNames(columnNames, e.Table.PKColumns)
 
+	// We are applying an event that did not originate from this instance, so
+	// pin GTID_NEXT on the very same transaction connection (loopback protection).
+	setGtid := true
+
 	switch e.Action {
 	case canal.UpdateAction:
-		db.engine.Exec("BEGIN")
-		for i, row := range e.Rows {
-			for j, item := range row {
-				if i%2 == 0 {
-					if isChar[j] {
-						oldColumnValue[j] = fmt.Sprintf("%s", item)
+		return db.runInTx(setGtid, func(tx *core.Tx) error {
+			for i, row := range e.Rows {
+				for j, item := range row {
+					if i%2 == 0 {
+						oldColumnValue[j] = fmtValue(item, isChar[j])
 					} else {
-						oldColumnValue[j] = fmt.Sprintf("%d", item)
+						newColumnValue[j] = fmtValue(item, isChar[j])
 					}
-				} else {
-					if isChar[j] {
-						if item == nil {
-							newColumnValue[j] = nil
-						} else {
-							newColumnValue[j] = fmt.Sprintf("%s", item)
-						}
-					} else {
-						newColumnValue[j] = fmt.Sprintf("%d", item)
-					}
-				}
-			}
-			if i%2 == 1 {
-				pkColumnValue := getPkColumnValues(oldColumnValue, e.Table.PKColumns)
-				updateSql, args, err := getUpdateSql(e.Table.Schema, e.Table.Name, columnNames, newColumnValue, pkColumnNames, pkColumnValue)
-				if err != nil {
-					log.Error(err)
-					return err
 				}
 
-				res, err := db.engine.DB().Exec(updateSql, args...)
-				if err != nil {
-					log.Error(err)
-					return err
+				if i%2 == 1 {
+					pkColumnValue := getPkColumnValues(oldColumnValue, e.Table.PKColumns)
+					updateSql, args, err := getUpdateSql(e.Table.Schema, e.Table.Name, columnNames, newColumnValue, pkColumnNames, pkColumnValue)
+					if err != nil {
+						return err
+					}
+
+					if _, err := tx.Exec(updateSql, args...); err != nil {
+						return err
+					}
 				}
-				log.Info(updateSql, args, res)
 			}
-		}
-		db.engine.Exec("COMMIT")
-		db.engine.Exec("SET GTID_NEXT='automatic'")
+			return nil
+		})
 	case canal.DeleteAction:
-		db.engine.Exec("BEGIN")
-		for _, row := range e.Rows {
-			for j, item := range row {
-				if isChar[j] {
-					oldColumnValue[j] = fmt.Sprintf("%s", item)
-				} else {
-					oldColumnValue[j] = fmt.Sprintf("%d", item)
+		return db.runInTx(setGtid, func(tx *core.Tx) error {
+			for _, row := range e.Rows {
+				for j, item := range row {
+					oldColumnValue[j] = fmtValue(item, isChar[j])
+				}
+
+				pkColumnValue := getPkColumnValues(oldColumnValue, e.Table.PKColumns)
+				deleteSql, args, err := getDeleteSql(e.Table.Schema, e.Table.Name, pkColumnNames, pkColumnValue)
+				if err != nil {
+					return err
+				}
+
+				if _, err := tx.Exec(deleteSql, args...); err != nil {
+					return err
 				}
 			}
-
-			pkColumnValue := getPkColumnValues(oldColumnValue, e.Table.PKColumns)
-			deleteSql, args, err := getDeleteSql(e.Table.Schema, e.Table.Name, pkColumnNames, pkColumnValue)
-			if err != nil {
-				log.Error(err)
-				return err
-			}
-
-			res, err := db.engine.DB().Exec(deleteSql, args...)
-			if err != nil {
-				log.Error(err)
-				return err
-			}
-			log.Info(deleteSql, args, res)
-		}
-		db.engine.Exec("COMMIT")
-		db.engine.Exec("SET GTID_NEXT='automatic'")
+			return nil
+		})
 	case canal.InsertAction:
-		db.engine.Exec("BEGIN")
-		for _, row := range e.Rows {
-			for j, item := range row {
-				if isChar[j] {
-					if item == nil {
-						newColumnValue[j] = nil
-					} else {
-						newColumnValue[j] = fmt.Sprintf("%s", item)
-					}
-				} else {
-					newColumnValue[j] = fmt.Sprintf("%d", item)
+		return db.runInTx(setGtid, func(tx *core.Tx) error {
+			for _, row := range e.Rows {
+				for j, item := range row {
+					newColumnValue[j] = fmtValue(item, isChar[j])
+				}
+
+				insertSql, args, err := getInsertSql(e.Table.Schema, e.Table.Name, columnNames, newColumnValue)
+				if err != nil {
+					return err
+				}
+
+				if _, err := tx.Exec(insertSql, args...); err != nil {
+					return err
 				}
 			}
-
-			insertSql, args, err := getInsertSql(e.Table.Schema, e.Table.Name, columnNames, newColumnValue)
-			if err != nil {
-				log.Error(err)
-				return err
-			}
-
-			res, err := db.engine.DB().Exec(insertSql, args...)
-			if err != nil {
-				log.Error(err)
-				return err
-			}
-			log.Info(insertSql, args, res)
-		}
-		db.engine.Exec("COMMIT")
-		db.engine.Exec("SET GTID_NEXT='automatic'")
+			return nil
+		})
 	default:
 		log.Infof("%v", e.String())
+		return nil
 	}
-	return nil
 }
 
 func (db *Database) String() string {

@@ -19,7 +19,10 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/casdoor/casdoor/util"
 	"github.com/go-sql-driver/mysql"
@@ -88,24 +91,68 @@ func (p *DatabaseSyncerProvider) InitAdapter() error {
 	return err
 }
 
-// GetOriginalUsers retrieves all users from the database
-func (p *DatabaseSyncerProvider) GetOriginalUsers() ([]*OriginalUser, error) {
-	var results []map[string]sql.NullString
-	err := p.Syncer.Ormer.Engine.Table(p.Syncer.getTable()).Find(&results)
-	if err != nil {
-		return nil, err
-	}
+const (
+	// dbSyncerQueryTimeoutEnv controls the per-query timeout (in seconds) used
+	// when reading the upstream database. This prevents a slow/hung query from
+	// blocking the syncer run forever.
+	dbSyncerQueryTimeoutEnv = "CASDOOR_SYNCER_DB_QUERY_TIMEOUT"
 
-	// Memory leak problem handling
-	// https://github.com/casdoor/casdoor/issues/1256
-	users := p.Syncer.getOriginalUsersFromMap(results)
-	// Clear map contents to help garbage collection
-	for i := range results {
-		for k := range results[i] {
-			delete(results[i], k)
+	// dbSyncerQueryTimeoutDefault is the default per-query timeout (5 minutes).
+	dbSyncerQueryTimeoutDefault = 5 * time.Minute
+
+	// dbSyncerPageSize is how many rows are fetched per page when reading a
+	// large upstream table, so we never load the whole table into memory at once.
+	dbSyncerPageSize = 1000
+)
+
+// syncerDBContext returns a context with a per-query timeout for reading the
+// upstream database, read once from the environment and cached.
+func syncerDBContext(owner, name string) (context.Context, context.CancelFunc) {
+	timeout := dbSyncerQueryTimeoutDefault
+	if s := os.Getenv(dbSyncerQueryTimeoutEnv); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			timeout = time.Duration(v) * time.Second
+		} else {
+			fmt.Printf("[syncer: %s/%s][WARN] invalid %s value %q, using default %s\n", owner, name, dbSyncerQueryTimeoutEnv, s, dbSyncerQueryTimeoutDefault)
 		}
 	}
-	results = nil
+	return context.WithTimeout(context.Background(), timeout)
+}
+
+// GetOriginalUsers retrieves all users from the database, with a per-query
+// timeout and paged reads so a huge upstream table does not hang the sync or
+// blow up memory.
+func (p *DatabaseSyncerProvider) GetOriginalUsers() ([]*OriginalUser, error) {
+	table := p.Syncer.getTable()
+
+	ctx, cancel := syncerDBContext(p.Syncer.Owner, p.Syncer.Name)
+	defer cancel()
+
+	users := []*OriginalUser{}
+	offset := 0
+	for {
+		var results []map[string]sql.NullString
+		err := p.Syncer.Ormer.Engine.Context(ctx).Table(table).Limit(dbSyncerPageSize, offset).Find(&results)
+		if err != nil {
+			return nil, err
+		}
+
+		// Memory leak problem handling
+		// https://github.com/casdoor/casdoor/issues/1256
+		users = append(users, p.Syncer.getOriginalUsersFromMap(results)...)
+		// Clear map contents to help garbage collection
+		for i := range results {
+			for k := range results[i] {
+				delete(results[i], k)
+			}
+		}
+		results = nil
+
+		if len(users)-offset < dbSyncerPageSize {
+			break
+		}
+		offset += dbSyncerPageSize
+	}
 
 	return users, nil
 }

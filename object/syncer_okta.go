@@ -15,13 +15,11 @@
 package object
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -143,7 +141,7 @@ func (p *OktaSyncerProvider) getOktaUsers(nextLink string) ([]*OktaUser, string,
 		apiUrl = fmt.Sprintf("https://%s/api/v1/users?limit=200", domain)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
@@ -155,7 +153,7 @@ func (p *OktaSyncerProvider) getOktaUsers(nextLink string) ([]*OktaUser, string,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err

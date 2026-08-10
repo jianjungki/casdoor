@@ -15,13 +15,11 @@
 package object
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -65,7 +63,7 @@ func (p *SCIMSyncerProvider) TestConnection() error {
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -156,7 +154,7 @@ func (p *SCIMSyncerProvider) buildSCIMEndpoint() string {
 
 // createSCIMRequest creates an HTTP request with proper authentication
 func (p *SCIMSyncerProvider) createSCIMRequest(method, url string, body io.Reader) (*http.Request, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
@@ -200,7 +198,7 @@ func (p *SCIMSyncerProvider) getSCIMUsers() ([]*OriginalUser, error) {
 			return nil, err
 		}
 
-		client := &http.Client{Timeout: 30 * time.Second}
+		client := newSyncerHttpClient()
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err

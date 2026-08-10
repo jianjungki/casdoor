@@ -291,23 +291,36 @@ func (syncer *Syncer) getUserValue(user *User, key string) string {
 		fmt.Println("conversion failed:", err)
 		return user.Id
 	}
-	value := mapData[util.SnakeToCamel(key)]
 
-	if str, ok := value.(string); ok {
-		return str
-	} else {
-		if value != nil {
-			valType := reflect.TypeOf(value)
+	camelKey := util.SnakeToCamel(key)
+	value := mapData[camelKey]
 
-			typeName := valType.Name()
-			switch typeName {
-			case "bool":
-				return strconv.FormatBool(value.(bool))
-			case "int":
-				return strconv.Itoa(value.(int))
-			}
+	switch v := value.(type) {
+	case string:
+		return v
+	case nil:
+		// Do NOT silently return a wrong value. If the key column is missing
+		// the user will be dropped by the caller's map building, so at least
+		// surface a loud warning to make the problem visible.
+		if key != "id" {
+			fmt.Printf("[syncer: %s/%s][WARN] key column '%s' (json field '%s') missing on user '%s', falling back to id '%s' - user may be silently dropped or mis-merged\n",
+				syncer.Owner, syncer.Name, key, camelKey, user.Name, user.Id)
 		}
 		return user.Id
+	case float64:
+		// JSON numbers decode to float64. Format integers without ".000000".
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case bool:
+		return strconv.FormatBool(v)
+	default:
+		return fmt.Sprintf("%v", v)
 	}
 }
 

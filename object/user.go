@@ -33,6 +33,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/xorm-io/builder"
 	"github.com/xorm-io/core"
+	"github.com/xorm-io/xorm"
 )
 
 const (
@@ -1088,14 +1089,17 @@ func AddUser(user *User, lang string) (bool, error) {
 	return affected != 0, nil
 }
 
-func AddUsers(users []*User) (bool, error) {
+// addUsersInTx performs the per-user preparation and insert using the given
+// transaction session. It mirrors the behavior of AddUsers but runs inside the
+// caller-provided transaction so the insert can be rolled back if a later step
+// of a larger batch fails.
+func addUsersInTx(tx *xorm.Session, users []*User) (bool, error) {
 	if len(users) == 0 {
 		return false, fmt.Errorf("no users are provided")
 	}
 
 	isUsernameLowered := conf.GetConfigBool("isUsernameLowered")
 
-	// organization := GetOrganizationByUser(users[0])
 	for _, user := range users {
 		// this function is only used for syncer or batch upload, so no need to encrypt the password
 		// user.UpdateUserPassword(organization)
@@ -1133,7 +1137,7 @@ func AddUsers(users []*User) (bool, error) {
 		}
 	}
 
-	affected, err := ormer.Engine.Insert(users)
+	affected, err := tx.Insert(users)
 	if err != nil {
 		if !strings.Contains(err.Error(), "Duplicate entry") {
 			return false, err
@@ -1143,6 +1147,23 @@ func AddUsers(users []*User) (bool, error) {
 	return affected != 0, nil
 }
 
+func AddUsers(users []*User) (bool, error) {
+	if len(users) == 0 {
+		return false, fmt.Errorf("no users are provided")
+	}
+
+	// Run the single insert within a transaction so that whatever AddUsers
+	// writes is atomic.
+	affected, err := ormer.Engine.Transaction(func(tx *xorm.Session) (interface{}, error) {
+		ok, innerErr := addUsersInTx(tx, users)
+		return ok, innerErr
+	})
+	if err != nil {
+		return false, err
+	}
+	return affected != nil && affected.(bool), nil
+}
+
 func AddUsersInBatch(users []*User) (bool, error) {
 	if len(users) == 0 {
 		return false, fmt.Errorf("no users are provided")
@@ -1150,24 +1171,34 @@ func AddUsersInBatch(users []*User) (bool, error) {
 
 	batchSize := conf.GetConfigBatchSize()
 
-	affected := false
-	for i := 0; i < len(users); i += batchSize {
-		start := i
-		end := i + batchSize
-		if end > len(users) {
-			end = len(users)
-		}
+	// Insert ALL sub-batches inside a single transaction. If any sub-batch
+	// fails, the whole batch is rolled back so a partial insert cannot leave
+	// the database in an inconsistent state.
+	affected, err := ormer.Engine.Transaction(func(tx *xorm.Session) (interface{}, error) {
+		anyAffected := false
+		for i := 0; i < len(users); i += batchSize {
+			start := i
+			end := i + batchSize
+			if end > len(users) {
+				end = len(users)
+			}
 
-		tmp := users[start:end]
-		fmt.Printf("The syncer adds users: [%d - %d]\n", start, end)
-		if ok, err := AddUsers(tmp); err != nil {
-			return false, err
-		} else if ok {
-			affected = true
+			tmp := users[start:end]
+			fmt.Printf("The syncer adds users: [%d - %d]\n", start, end)
+			ok, innerErr := addUsersInTx(tx, tmp)
+			if innerErr != nil {
+				return nil, innerErr
+			}
+			if ok {
+				anyAffected = true
+			}
 		}
+		return anyAffected, nil
+	})
+	if err != nil {
+		return false, err
 	}
-
-	return affected, nil
+	return affected != nil && affected.(bool), nil
 }
 
 func deleteUser(user *User) (bool, error) {

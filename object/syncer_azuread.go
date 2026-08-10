@@ -15,14 +15,12 @@
 package object
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -124,7 +122,7 @@ func (p *AzureAdSyncerProvider) getAzureAdAccessToken() (string, error) {
 	data.Set("scope", "https://graph.microsoft.com/.default")
 	data.Set("grant_type", "client_credentials")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", tokenUrl, strings.NewReader(data.Encode()))
@@ -134,7 +132,7 @@ func (p *AzureAdSyncerProvider) getAzureAdAccessToken() (string, error) {
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -169,7 +167,7 @@ func (p *AzureAdSyncerProvider) getAzureAdUsers(accessToken string) ([]*AzureAdU
 	nextLink := "https://graph.microsoft.com/v1.0/users?$top=999"
 
 	for nextLink != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := syncerHttpContext()
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(ctx, "GET", nextLink, nil)
@@ -180,7 +178,7 @@ func (p *AzureAdSyncerProvider) getAzureAdUsers(accessToken string) ([]*AzureAdU
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 		req.Header.Set("Content-Type", "application/json")
 
-		client := &http.Client{Timeout: 30 * time.Second}
+		client := newSyncerHttpClient()
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
