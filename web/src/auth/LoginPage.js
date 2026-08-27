@@ -330,6 +330,10 @@ class LoginPage extends React.Component {
       values["samlRequest"] = oAuthParams.samlRequest;
       values["type"] = "saml";
       values["relayState"] = oAuthParams.relayState;
+    } else if (values["type"] === "saml") {
+      // IdP-initiated SSO, the SP doesn't send any SAMLRequest to Casdoor
+      values["samlRequest"] = "";
+      values["relayState"] = Util.getRelayState();
     }
   }
 
@@ -361,9 +365,8 @@ class LoginPage extends React.Component {
       return;
     }
 
-    if (resp.data3) {
-      sessionStorage.setItem("signinUrl", window.location.pathname + window.location.search);
-      Setting.goToLink("/account");
+    if (resp.data === Setting.RequiredUpdatePassword) {
+      Setting.goToUpdatePassword();
       return;
     }
 
@@ -560,11 +563,6 @@ class LoginPage extends React.Component {
             const responseTypes = responseType.split(" ");
             const responseMode = oAuthParams?.responseMode || "query";
             if (responseType === "login") {
-              if (res.data3) {
-                sessionStorage.setItem("signinUrl", window.location.pathname + window.location.search);
-                Setting.goToLink("/account");
-                return;
-              }
               Setting.showMessage("success", i18next.t("application:Logged in successfully"));
               this.props.onLoginSuccess();
             } else if (responseType === "code") {
@@ -575,11 +573,6 @@ class LoginPage extends React.Component {
                 userCodeStatus: "success",
               });
             } else if (responseTypes.includes("token") || responseTypes.includes("id_token")) {
-              if (res.data3) {
-                sessionStorage.setItem("signinUrl", window.location.pathname + window.location.search);
-                Setting.goToLink("/account");
-                return;
-              }
               const amendatoryResponseType = responseType === "token" ? "access_token" : responseType;
               const accessToken = res.data;
               if (responseMode === "form_post") {
@@ -598,21 +591,16 @@ class LoginPage extends React.Component {
                 this.props.onLoginSuccess(window.location.href);
                 return;
               }
-              if (res.data3) {
-                sessionStorage.setItem("signinUrl", window.location.pathname + window.location.search);
-                Setting.goToLink("/account");
-                return;
-              }
               if (res.data2.method === "POST") {
                 this.setState({
                   samlResponse: res.data,
                   redirectUrl: res.data2.redirectUrl,
-                  relayState: oAuthParams.relayState,
+                  relayState: values["relayState"] ?? "",
                 });
               } else {
                 const SAMLResponse = res.data;
                 const redirectUri = res.data2.redirectUrl;
-                Setting.goToLink(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}SAMLResponse=${encodeURIComponent(SAMLResponse)}&RelayState=${encodeURIComponent(oAuthParams.relayState)}`);
+                Setting.goToLink(`${redirectUri}${redirectUri.includes("?") ? "&" : "?"}SAMLResponse=${encodeURIComponent(SAMLResponse)}&RelayState=${encodeURIComponent(values["relayState"] ?? "")}`);
               }
             }
           };
@@ -1553,7 +1541,7 @@ class LoginPage extends React.Component {
     ]);
 
     application?.signinMethods?.forEach((signinMethod) => {
-      if (signinMethod.rule === "Hide password") {
+      if (Setting.isSigninMethodHidden(signinMethod)) {
         return;
       }
 

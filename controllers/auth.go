@@ -148,10 +148,25 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 		}
 	}
 
-	if form.Type == ResponseTypeLogin {
+	// Revoke the tokens of the displaced login before the response is built, otherwise the
+	// token that this login creates below would be revoked too
+	if application.EnableExclusiveSignin {
+		_, err = object.ExpireTokenByUserAndApplication(user.Owner, user.Name, application.Name)
+		if err != nil {
+			c.ResponseError(err.Error(), nil)
+			return
+		}
+	}
+
+	if user.NeedUpdatePassword {
+		// no credential may be issued here, otherwise the requirement could be bypassed
+		// by reading the credential from the response of this API directly
+		c.SetSessionUsername(userId)
+		resp = &Response{Status: "ok", Msg: "", Data: object.RequiredUpdatePassword, Data3: true}
+	} else if form.Type == ResponseTypeLogin {
 		c.SetSessionUsername(userId)
 		util.LogInfo(c.Ctx, "API: [%s] signed in", userId)
-		resp = &Response{Status: "ok", Msg: "", Data: userId, Data3: user.NeedUpdatePassword}
+		resp = &Response{Status: "ok", Msg: "", Data: userId}
 	} else if form.Type == ResponseTypeCode {
 		clientId := c.Ctx.Input.Query("clientId")
 		responseType := c.Ctx.Input.Query("responseType")
@@ -182,7 +197,6 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 
 		if consentRequired {
 			resp = &Response{Status: "ok", Data: map[string]bool{"required": true}}
-			resp.Data3 = user.NeedUpdatePassword
 		} else {
 			code, err := object.GetOAuthCode(userId, clientId, form.Provider, form.SigninMethod, responseType, redirectUri, scope, state, nonce, codeChallenge, resource, c.Ctx.Request.Host, c.GetAcceptLanguage())
 			if err != nil {
@@ -191,7 +205,6 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 			}
 
 			resp = codeToResponse(code)
-			resp.Data3 = user.NeedUpdatePassword
 		}
 	} else if form.Type == ResponseTypeToken || form.Type == ResponseTypeIdToken { // implicit flow
 		if !object.IsGrantTypeValid(form.Type, application.GrantTypes) {
@@ -205,8 +218,6 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 			} else {
 				token, _ := object.GetTokenByUser(application, user, expandedScope, nonce, c.Ctx.Request.Host)
 				resp = tokenToResponse(token)
-
-				resp.Data3 = user.NeedUpdatePassword
 			}
 		}
 	} else if form.Type == ResponseTypeDevice {
@@ -250,14 +261,14 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 
 		object.DeviceAuthMap.Store(authCacheCast.UserName, deviceAuthCacheDeviceCodeCast)
 
-		resp = &Response{Status: "ok", Msg: "", Data: userId, Data3: user.NeedUpdatePassword}
+		resp = &Response{Status: "ok", Msg: "", Data: userId}
 	} else if form.Type == ResponseTypeSaml { // saml flow
 		res, redirectUrl, method, err := object.GetSamlResponse(application, user, form.SamlRequest, c.Ctx.Request.Host)
 		if err != nil {
 			c.ResponseError(err.Error(), nil)
 			return
 		}
-		resp = &Response{Status: "ok", Msg: "", Data: res, Data2: map[string]interface{}{"redirectUrl": redirectUrl, "method": method}, Data3: user.NeedUpdatePassword}
+		resp = &Response{Status: "ok", Msg: "", Data: res, Data2: map[string]interface{}{"redirectUrl": redirectUrl, "method": method}}
 
 		if application.EnableSigninSession || application.HasPromptPage() {
 			// The prompt page needs the user to be signed in
@@ -720,12 +731,17 @@ func (c *ApiController) Login() {
 				c.ResponseError(fmt.Sprintf(c.T("auth:The application: %s does not exist"), authForm.Application))
 				return
 			}
-			if authForm.SigninMethod == "Password" && !application.IsPasswordEnabled() {
+			// Every request reaching this branch carries a password and is authenticated
+			// by it, no matter which "signinMethod" the client claims. So the check can
+			// not be limited to signinMethod == "Password", otherwise an empty or unknown
+			// signinMethod would bypass the disabled password login
+			if authForm.SigninMethod == "LDAP" {
+				if !application.IsLdapEnabled() {
+					c.ResponseError(c.T("auth:The login method: login with LDAP is not enabled for the application"))
+					return
+				}
+			} else if !application.IsPasswordEnabled() {
 				c.ResponseError(c.T("auth:The login method: login with password is not enabled for the application"))
-				return
-			}
-			if authForm.SigninMethod == "LDAP" && !application.IsLdapEnabled() {
-				c.ResponseError(c.T("auth:The login method: login with LDAP is not enabled for the application"))
 				return
 			}
 
@@ -1276,6 +1292,25 @@ func (c *ApiController) Login() {
 			}
 
 			user := c.getCurrentUser()
+			if user == nil {
+				c.ResponseError(c.T("auth:Unauthorized operation"))
+				return
+			}
+
+			var organization *object.Organization
+			organization, err = object.GetOrganizationByUser(user)
+			if err != nil {
+				c.ResponseError(err.Error())
+				return
+			}
+
+			// the MFA enrollment is checked here too, otherwise it could be bypassed by
+			// visiting the authorize URL of another application with an existing session
+			if object.IsNeedPromptMfa(organization, user) {
+				c.ResponseOk(object.RequiredMfa)
+				return
+			}
+
 			resp = c.HandleLoggedIn(application, user, &authForm)
 
 			c.Ctx.Input.SetParam("recordUserId", user.GetId())

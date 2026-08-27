@@ -187,9 +187,12 @@ func extendApplicationWithSigninMethods(application *Application) (err error) {
 		application.SigninMethods = append(application.SigninMethods, signinMethod)
 	}
 
-	if len(application.SigninMethods) == 0 {
-		signinMethod := &SigninMethod{Name: "Password", DisplayName: "Password", Rule: "All"}
-		application.SigninMethods = append(application.SigninMethods, signinMethod)
+	// The "Hide password" rule used to be named "Hide-Password", normalize the legacy
+	// value so that the frontend and the backend agree on what is hidden
+	for _, signinMethod := range application.SigninMethods {
+		if signinMethod != nil && signinMethod.Rule == SigninMethodRuleHidePasswordLegacy {
+			signinMethod.Rule = SigninMethodRuleHidePassword
+		}
 	}
 
 	return
@@ -251,7 +254,11 @@ func GetMaskedApplication(application *Application, userId string) *Application 
 	}
 
 	application.ClientSecret = "***"
+	application.ClientCert = "***"
 	application.Cert = "***"
+	application.RegistrationAccessToken = "***"
+	application.IpWhitelist = "***"
+	application.BackchannelLogoutUri = "***"
 	application.EnablePassword = false
 	application.EnableSigninSession = false
 	application.EnableCodeSignin = false
@@ -292,10 +299,20 @@ func GetMaskedApplication(application *Application, userId string) *Application 
 	application.RedirectUris = []string{}
 	application.TokenFormat = "***"
 	application.TokenFields = []string{}
+	application.TokenSigningMethod = "***"
+	application.TokenAttributes = []*JwtItem{}
 	application.ExpireInHours = -1
 	application.RefreshExpireInHours = -1
+	application.CookieExpireInHours = -1
 	application.FailedSigninLimit = -1
 	application.FailedSigninFrozenTime = -1
+
+	// the reverse proxy fields expose the internal deployment topology
+	application.Domain = "***"
+	application.OtherDomains = []string{}
+	application.UpstreamHost = "***"
+	application.SslMode = "***"
+	application.SslCert = "***"
 
 	if application.OrganizationObj != nil {
 		application.OrganizationObj.MasterPassword = "***"
@@ -303,8 +320,16 @@ func GetMaskedApplication(application *Application, userId string) *Application 
 		application.OrganizationObj.MasterVerificationCode = "***"
 		application.OrganizationObj.PasswordType = "***"
 		application.OrganizationObj.PasswordSalt = "***"
+		application.OrganizationObj.IpWhitelist = "***"
+		application.OrganizationObj.KerberosRealm = "***"
+		application.OrganizationObj.KerberosKdcHost = "***"
+		application.OrganizationObj.KerberosKeytab = "***"
+		application.OrganizationObj.KerberosServiceName = "***"
 		application.OrganizationObj.InitScore = -1
 		application.OrganizationObj.EnableSoftDeletion = false
+		application.OrganizationObj.OrgBalance = -1
+		application.OrganizationObj.UserBalance = -1
+		application.OrganizationObj.BalanceCredit = -1
 
 		if !isOrgUser {
 			application.OrganizationObj.MfaItems = nil
@@ -459,14 +484,9 @@ func redirectUriMatchesTarget(redirectUri, targetUri *url.URL) bool {
 func (application *Application) IsPasswordEnabled() bool {
 	if len(application.SigninMethods) == 0 {
 		return application.EnablePassword
-	} else {
-		for _, signinMethod := range application.SigninMethods {
-			if signinMethod.Name == "Password" {
-				return true
-			}
-		}
-		return false
 	}
+
+	return application.HasSigninMethod("Password")
 }
 
 func (application *Application) IsPasswordWithLdapEnabled() bool {
@@ -509,25 +529,11 @@ func (application *Application) IsCodeSigninViaSmsEnabled() bool {
 }
 
 func (application *Application) IsLdapEnabled() bool {
-	if len(application.SigninMethods) > 0 {
-		for _, signinMethod := range application.SigninMethods {
-			if signinMethod.Name == "LDAP" {
-				return true
-			}
-		}
-	}
-	return false
+	return application.HasSigninMethod("LDAP")
 }
 
 func (application *Application) IsFaceIdEnabled() bool {
-	if len(application.SigninMethods) > 0 {
-		for _, signinMethod := range application.SigninMethods {
-			if signinMethod.Name == "Face ID" {
-				return true
-			}
-		}
-	}
-	return false
+	return application.HasSigninMethod("Face ID")
 }
 
 func (application *Application) IsOriginValid(origin string) bool {

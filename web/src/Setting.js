@@ -568,6 +568,7 @@ export const GetTranslatedUserItems = () => {
     {name: "Balance credit", label: i18next.t("organization:Balance credit")},
     {name: "Cart", label: i18next.t("general:Cart")},
     {name: "Transactions", label: i18next.t("general:Transactions")},
+    {name: "UID number", label: i18next.t("general:UID number")},
     {name: "Score", label: i18next.t("user:Score")},
     {name: "Karma", label: i18next.t("user:Karma")},
     {name: "Ranking", label: i18next.t("user:Ranking")},
@@ -956,6 +957,17 @@ export function isPromptAnswered(user, application) {
 export const MfaRuleRequired = "Required";
 export const MfaRulePrompted = "Prompted";
 export const MfaRuleOptional = "Optional";
+
+export const RequiredUpdatePassword = "RequiredUpdatePassword";
+
+export function goToUpdatePassword() {
+  // remember where the login was started from, to go back after the password is updated
+  const signinUrl = localStorage.getItem("signinUrl");
+  if (signinUrl) {
+    sessionStorage.setItem("signinUrl", signinUrl);
+  }
+  goToLink("/account");
+}
 
 export function isRequiredEnableMfa(user, organization) {
   if (!user || !organization || (!organization.mfaItems && !user.mfaItems)) {
@@ -1568,9 +1580,15 @@ export function renderLogo(application) {
   }
 }
 
+export function isSigninMethodHidden(signinMethod) {
+  // the "Hide password" rule used to be named "Hide-Password", the applications
+  // configured before the rename still store the legacy value
+  return signinMethod?.rule === "Hide password" || signinMethod?.rule === "Hide-Password";
+}
+
 function isSigninMethodEnabled(application, signinMethod) {
   if (application && application.signinMethods) {
-    return application.signinMethods.filter(item => item.name === signinMethod && item.rule !== "Hide password").length > 0;
+    return application.signinMethods.filter(item => item.name === signinMethod && !isSigninMethodHidden(item)).length > 0;
   } else {
     return false;
   }
@@ -1792,6 +1810,13 @@ export function getOption(label, value) {
     label,
     value,
   };
+}
+
+// getDisplayNameOption returns an option whose value is "owner/name" and whose label is
+// "displayName (owner/name)", so that the item can be recognized by both its display name and its ID.
+export function getDisplayNameOption(item) {
+  const id = `${item.owner}/${item.name}`;
+  return getOption(item.displayName ? `${item.displayName} (${id})` : id, id);
 }
 
 export function getArrayItem(array, key, value) {
@@ -2123,7 +2148,7 @@ export function isAnonymousUserName(userName) {
 export function getUserCommonFields() {
   return ["Owner", "Name", "CreatedTime", "UpdatedTime", "DeletedTime", "Id", "ExternalId", "Type", "Password", "PasswordSalt", "PasswordType", "DisplayName", "FirstName", "LastName", "Avatar", "AvatarType", "PermanentAvatar",
     "Email", "EmailVerified", "Phone", "CountryCode", "Location", "Address", "Affiliation", "Title", "IdCardType", "IdCard", "RealName", "IsVerified", "Homepage", "Bio", "Tag", "Region",
-    "Language", "Gender", "Birthday", "Education", "Score", "Karma", "Ranking", "Balance", "BalanceCredit", "Currency", "BalanceCurrency", "IsDefaultAvatar", "IsOnline", "IsAdmin", "IsForbidden", "IsDeleted",
+    "Language", "Gender", "Birthday", "Education", "UidNumber", "Score", "Karma", "Ranking", "Balance", "BalanceCredit", "Currency", "BalanceCurrency", "IsDefaultAvatar", "IsOnline", "IsAdmin", "IsForbidden", "IsDeleted",
     "SignupApplication", "RegisterType", "RegisterSource", "CreatedIp", "LastSigninTime", "LastSigninIp",
     "PreferredMfaType", "TotpSecret", "RecoveryCodes", "MfaPhoneEnabled", "MfaEmailEnabled", "MfaRadiusEnabled", "MfaRadiusUsername", "MfaRadiusProvider", "MfaPushEnabled", "MfaPushReceiver", "MfaPushProvider",
     "WebauthnCredentials", "FaceIds", "Invitation", "InvitationCode", "Ldap", "Properties", "Groups"];
@@ -2299,7 +2324,9 @@ function getPreferredMfaProp(mfaProps) {
 }
 
 export function checkLoginMfa(res, body, params, handleLogin, componentThis, requireRedirect = null) {
-  if (res.data === RequiredMfa) {
+  if (res.data === RequiredUpdatePassword) {
+    goToUpdatePassword();
+  } else if (res.data === RequiredMfa) {
     if (!requireRedirect) {
       componentThis.props.onLoginSuccess(window.location.href);
     } else {

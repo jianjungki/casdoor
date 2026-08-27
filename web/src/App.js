@@ -380,6 +380,10 @@ class App extends Component {
   }
 
   setLanguage(account) {
+    if (Conf.ForceLanguage !== "") {
+      return;
+    }
+
     const language = account?.language;
     if (language !== null && language !== "" && language !== i18next.language) {
       Setting.setLanguage(language);
@@ -470,7 +474,7 @@ class App extends Component {
           if (!localStorage.getItem("language")) {
             this.setLanguage(account);
           }
-          this.setTheme(Setting.getThemeData(account.organization), Conf.InitThemeAlgorithm);
+          this.setTheme(Setting.getThemeData(account.organization, this.state.application), Conf.InitThemeAlgorithm);
           setTourLogo(account.organization.logo);
           setOrgIsTourVisible(account.organization.enableTour);
         } else {
