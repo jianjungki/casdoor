@@ -16,6 +16,7 @@ package object
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/casdoor/casdoor/util"
@@ -208,6 +209,52 @@ func (syncer *Syncer) syncUsers() (err error) {
 				if err != nil {
 					return err
 				}
+			}
+		}
+	} else {
+		// Upstream is the source of truth (read-only syncer). Any local user
+		// that is NOT present upstream anymore is an "orphan" — typically an
+		// employee who left and was removed from DingTalk/WeCom/Lark/etc. By
+		// default Casdoor left them in place forever, so the user list kept
+		// growing with stale leavers. Handle them according to the policy.
+		policy := strings.ToLower(strings.TrimSpace(syncer.OrphanUserPolicy))
+		if policy == "disable" || policy == "delete" {
+			disabled, deleted := 0, 0
+			for _, user := range users {
+				primary := syncer.getUserValue(user, key)
+				if _, ok := myOUsers[primary]; ok {
+					continue
+				}
+
+				switch policy {
+				case "disable":
+					// Soft disable so the record is kept but the user can no
+					// longer sign in. Skip users that are already forbidden to
+					// avoid pointless writes.
+					if user.IsForbidden {
+						continue
+					}
+					fmt.Printf("[syncer: %s/%s][ORPHAN] disabling local user '%s' (no longer present upstream)\n", syncer.Owner, syncer.Name, user.Name)
+						_, err = SetUserField(user, "is_forbidden", "true")
+					if err != nil {
+						// Log loudly but keep processing the rest: one bad
+						// disable should not block cleaning up the others.
+						fmt.Printf("[syncer: %s/%s][ORPHAN] failed to disable user '%s': %s\n", syncer.Owner, syncer.Name, user.Name, err.Error())
+						continue
+					}
+					disabled++
+				case "delete":
+					fmt.Printf("[syncer: %s/%s][ORPHAN] deleting local user '%s' (no longer present upstream)\n", syncer.Owner, syncer.Name, user.Name)
+					_, err = DeleteUser(user)
+					if err != nil {
+						fmt.Printf("[syncer: %s/%s][ORPHAN] failed to delete user '%s': %s\n", syncer.Owner, syncer.Name, user.Name, err.Error())
+						continue
+					}
+					deleted++
+				}
+			}
+			if disabled != 0 || deleted != 0 {
+				fmt.Printf("[syncer: %s/%s] orphan handling: %d disabled, %d deleted (policy=%s)\n", syncer.Owner, syncer.Name, disabled, deleted, policy)
 			}
 		}
 	}

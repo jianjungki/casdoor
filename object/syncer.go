@@ -64,6 +64,15 @@ type Syncer struct {
 	IsReadOnly       bool           `json:"isReadOnly"`
 	IsEnabled        bool           `json:"isEnabled"`
 
+	// OrphanUserPolicy controls what happens to a local Casdoor user that no
+	// longer exists in the upstream source (e.g. an employee who left). It only
+	// takes effect when the syncer is read-only (upstream is the source of
+	// truth); for two-way syncers a local-only user is instead pushed upstream.
+	//   "" / "off"     -> do nothing (legacy behavior; leavers stay forever)
+	//   "disable"      -> set IsForbidden=true (soft disable, keep the record)
+	//   "delete"       -> hard delete the user (irreversible)
+	OrphanUserPolicy string `xorm:"varchar(100)" json:"orphanUserPolicy"`
+
 	Ormer     *Ormer      `xorm:"-" json:"-"`
 	SshClient *ssh.Client `xorm:"-" json:"-"`
 }
