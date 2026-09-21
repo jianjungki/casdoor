@@ -60,18 +60,8 @@ type Syncer struct {
 	AvatarBaseUrl    string         `xorm:"varchar(100)" json:"avatarBaseUrl"`
 	ErrorText        string         `xorm:"mediumtext" json:"errorText"`
 	SyncInterval     int            `json:"syncInterval"`
-	LastSync         string         `xorm:"varchar(100)" json:"lastSync"`
 	IsReadOnly       bool           `json:"isReadOnly"`
 	IsEnabled        bool           `json:"isEnabled"`
-
-	// OrphanUserPolicy controls what happens to a local Casdoor user that no
-	// longer exists in the upstream source (e.g. an employee who left). It only
-	// takes effect when the syncer is read-only (upstream is the source of
-	// truth); for two-way syncers a local-only user is instead pushed upstream.
-	//   "" / "off"     -> do nothing (legacy behavior; leavers stay forever)
-	//   "disable"      -> set IsForbidden=true (soft disable, keep the record)
-	//   "delete"       -> hard delete the user (irreversible)
-	OrphanUserPolicy string `xorm:"varchar(100)" json:"orphanUserPolicy"`
 
 	Ormer     *Ormer      `xorm:"-" json:"-"`
 	SshClient *ssh.Client `xorm:"-" json:"-"`
@@ -243,14 +233,12 @@ func updateSyncerErrorText(syncer *Syncer, line string) (bool, error) {
 	return affected != 0, nil
 }
 
-// updateSyncerLastSync records the last successful sync time on the syncer so
-// operators can detect a syncer that silently stopped syncing by querying
-// stale "last_sync" values.
-func updateSyncerLastSync(syncer *Syncer) error {
-	_, err := ormer.Engine.ID(core.PK{syncer.Owner, syncer.Name}).Cols("last_sync").Update(&Syncer{
-		LastSync: util.GetCurrentTime(),
-	})
-	return err
+func recordSyncerError(syncer *Syncer, err error) {
+	line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
+	_, err2 := updateSyncerErrorText(syncer, line)
+	if err2 != nil {
+		fmt.Printf("recordSyncerError() error: %s\n", err2.Error())
+	}
 }
 
 func AddSyncer(syncer *Syncer) (bool, error) {
@@ -341,18 +329,14 @@ func RunSyncer(syncer *Syncer) error {
 		return err
 	}
 
-	return syncer.syncUsers()
-}
+	// Sync groups first so that the groups referenced by the synced users already exist
+	err = syncer.syncGroups()
+	if err != nil {
+		// Log error but don't fail the entire sync
+		fmt.Printf("Warning: syncGroups() error: %s\n", err.Error())
+	}
 
-// RunSyncerAsync queues a manual sync and returns immediately so the HTTP
-// request is not held open while communicating with the upstream system.
-func RunSyncerAsync(syncer *Syncer) {
-	runSyncerAsync(syncer, "manual", func() error {
-		if err := syncer.initAdapter(); err != nil {
-			return err
-		}
-		return syncer.syncUsers()
-	})
+	return syncer.syncUsers()
 }
 
 func TestSyncer(syncer Syncer) error {
@@ -361,7 +345,8 @@ func TestSyncer(syncer Syncer) error {
 		return err
 	}
 
-	if syncer.Password == "***" {
+	// the syncer may not be created yet when the connection is tested from the syncer add page
+	if syncer.Password == "***" && oldSyncer != nil {
 		syncer.Password = oldSyncer.Password
 	}
 
