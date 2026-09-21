@@ -36,7 +36,12 @@ func (syncer *Syncer) createGroupFromOriginalGroup(originalGroup *OriginalGroup)
 		Type:        originalGroup.Type,
 		Manager:     originalGroup.Manager,
 		IsEnabled:   true,
-		IsTopGroup:  true,
+		ParentId:    originalGroup.ParentId,
+		IsTopGroup:  originalGroup.ParentId == "",
+	}
+
+	if group.IsTopGroup {
+		group.ParentId = syncer.Organization
 	}
 
 	if originalGroup.Email != "" {
@@ -60,22 +65,12 @@ func (syncer *Syncer) syncGroups() (err error) {
 	// Get existing groups from Casdoor
 	groups, err := GetGroups(syncer.Organization)
 	if err != nil {
-		line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
-		_, err2 := updateSyncerErrorText(syncer, line)
-		if err2 != nil {
-			panic(err2)
-		}
 		return err
 	}
 
 	// Get groups from the external system
 	oGroups, err := syncer.getOriginalGroups()
 	if err != nil {
-		line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
-		_, err2 := updateSyncerErrorText(syncer, line)
-		if err2 != nil {
-			panic(err2)
-		}
 		return err
 	}
 
@@ -97,10 +92,13 @@ func (syncer *Syncer) syncGroups() (err error) {
 		} else {
 			// Group already exists, could update it here if needed
 			existingGroup := myGroups[oGroup.Name]
+			newGroup := syncer.createGroupFromOriginalGroup(oGroup)
 
 			// Update group display name and other fields if they've changed
-			if existingGroup.DisplayName != oGroup.DisplayName {
-				existingGroup.DisplayName = oGroup.DisplayName
+			if existingGroup.DisplayName != newGroup.DisplayName || existingGroup.ParentId != newGroup.ParentId {
+				existingGroup.DisplayName = newGroup.DisplayName
+				existingGroup.ParentId = newGroup.ParentId
+				existingGroup.IsTopGroup = newGroup.IsTopGroup
 				existingGroup.UpdatedTime = util.GetCurrentTime()
 				_, err = UpdateGroup(existingGroup.GetId(), existingGroup, true, "")
 				if err != nil {
@@ -125,6 +123,7 @@ func (syncer *Syncer) syncGroups() (err error) {
 func (syncer *Syncer) syncGroupsNoError() {
 	err := syncer.syncGroups()
 	if err != nil {
+		recordSyncerError(syncer, err)
 		fmt.Printf("syncGroupsNoError() error: %s\n", err.Error())
 	}
 }

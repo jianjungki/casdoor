@@ -16,99 +16,45 @@ package object
 
 import (
 	"fmt"
-	"time"
-
-	"github.com/casdoor/casdoor/util"
 )
 
-func (syncer *Syncer) syncUsers() (err error) {
+func (syncer *Syncer) syncUsers() error {
 	if len(syncer.TableColumns) == 0 {
 		return fmt.Errorf("The syncer table columns should not be empty")
 	}
 
-	start := time.Now()
-	fmt.Printf("[syncer: %s/%s] syncUsers() started (%d table columns)\n", syncer.Owner, syncer.Name, len(syncer.TableColumns))
-	defer func() {
-		status := "OK"
-		if err != nil {
-			status = fmt.Sprintf("ERROR: %v", err)
-		} else {
-			// Persist last successful sync time so operators can detect a
-			// syncer that silently stopped syncing via a stale last_sync.
-			_ = updateSyncerLastSync(syncer)
-		}
-		fmt.Printf("[syncer: %s/%s] syncUsers() finished in %s, status=%s\n", syncer.Owner, syncer.Name, time.Since(start).Round(time.Millisecond), status)
-	}()
+	fmt.Printf("Running syncUsers()..\n")
 
 	users, err := GetUsers(syncer.Organization)
 	if err != nil {
-		line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
-		_, err2 := updateSyncerErrorText(syncer, line)
-		if err2 != nil {
-			panic(err2)
-		}
-
 		return err
 	}
 
 	oUsers, err := syncer.getOriginalUsers()
 	if err != nil {
-		line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
-		_, err2 := updateSyncerErrorText(syncer, line)
-		if err2 != nil {
-			panic(err2)
-		}
-
 		return err
 	}
 
-	fmt.Printf("[syncer: %s/%s] local users=%d, upstream users=%d\n", syncer.Owner, syncer.Name, len(users), len(oUsers))
+	fmt.Printf("Users: %d, oUsers: %d\n", len(users), len(oUsers))
 
 	var affiliationMap map[int]string
 	if syncer.AffiliationTable != "" {
 		_, affiliationMap, err = syncer.getAffiliationMap()
 		if err != nil {
-			line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
-			_, err2 := updateSyncerErrorText(syncer, line)
-			if err2 != nil {
-				panic(err2)
-			}
-
 			return err
 		}
 	}
 
 	key := syncer.getLocalPrimaryKey()
 
-	// Build the local user map while detecting problems (duplicate or empty key
-	// values) that would otherwise silently drop/merge users.
 	myUsers := map[string]*User{}
 	for _, m := range users {
-		k := syncer.getUserValue(m, key)
-		if k == "" || key == "id" && k == m.Id && m.Id == "" {
-			fmt.Printf("[syncer: %s/%s][WARN] local user '%s' has empty primary key '%s', skipping to avoid silent corruption\n", syncer.Owner, syncer.Name, m.Name, key)
-			continue
-		}
-		if pre, dup := myUsers[k]; dup {
-			fmt.Printf("[syncer: %s/%s][WARN] DUPLICATE local primary key '%s'=%q used by users '%s' and '%s', last one wins - possible silent data loss\n",
-				syncer.Owner, syncer.Name, key, k, pre.Name, m.Name)
-		}
-		myUsers[k] = m
+		myUsers[syncer.getUserValue(m, key)] = m
 	}
 
-	// Same detection for the upstream (original) users map.
 	myOUsers := map[string]*User{}
 	for _, m := range oUsers {
-		k := syncer.getUserValue(m, key)
-		if k == "" {
-			fmt.Printf("[syncer: %s/%s][WARN] upstream user '%s' has empty primary key '%s', skipping to avoid silent corruption\n", syncer.Owner, syncer.Name, m.Name, key)
-			continue
-		}
-		if pre, dup := myOUsers[k]; dup {
-			fmt.Printf("[syncer: %s/%s][WARN] DUPLICATE upstream primary key '%s'=%q used by users '%s' and '%s', last one wins - possible silent data loss\n",
-				syncer.Owner, syncer.Name, key, k, pre.Name, m.Name)
-		}
-		myOUsers[k] = m
+		myOUsers[syncer.getUserValue(m, key)] = m
 	}
 
 	newUsers := []*User{}
@@ -161,20 +107,11 @@ func (syncer *Syncer) syncUsers() (err error) {
 							return err
 						}
 					} else {
-						// True two-way conflict: the local user was modified
-						// (user.Hash != user.PreHash), upstream was modified too
-						// (user.PreHash != oHash), and they disagree
-						// (user.Hash != oHash). The code below silently
-						// overwrites the local change with the upstream value.
-						// Surface a loud warning so this never happens silently.
-						fmt.Printf("[syncer: %s/%s][CONFLICT] two-way modification conflict on key '%s'=%q for user '%s': local hash differs from upstream, OVERWRITING local changes with upstream source of truth\n",
-							syncer.Owner, syncer.Name, key, primary, user.Name)
-
 						updatedUser := syncer.createUserFromOriginalUser(oUser, affiliationMap)
 						updatedUser.Hash = oHash
 						updatedUser.PreHash = oHash
 
-						fmt.Printf("Update from oUser to user (2nd condition, conflict - local overwritten): %v\n", updatedUser)
+						fmt.Printf("Update from oUser to user (2nd condition): %v\n", updatedUser)
 						_, err = syncer.updateUserForOriginalFields(updatedUser, key)
 						if err != nil {
 							return err
@@ -218,6 +155,7 @@ func (syncer *Syncer) syncUsers() (err error) {
 func (syncer *Syncer) syncUsersNoError() {
 	err := syncer.syncUsers()
 	if err != nil {
+		recordSyncerError(syncer, err)
 		fmt.Printf("syncUsersNoError() error: %s\n", err.Error())
 	}
 }
