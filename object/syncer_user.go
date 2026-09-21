@@ -168,6 +168,7 @@ func RunSyncUsersJob() {
 		return
 	}
 
+	// A failing syncer must not stop the others; its error is already in its error text
 	for _, syncer := range syncers {
 		// Isolate each syncer: a panic while scheduling one syncer must not
 		// prevent the remaining syncers from being scheduled.

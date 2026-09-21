@@ -199,6 +199,7 @@ type User struct {
 	Zoom            string `xorm:"zoom varchar(100)" json:"zoom"`
 	MetaMask        string `xorm:"metamask varchar(100)" json:"metamask"`
 	Web3Onboard     string `xorm:"web3onboard varchar(100)" json:"web3onboard"`
+	Oidc            string `xorm:"oidc varchar(100)" json:"oidc"`
 	Custom          string `xorm:"custom varchar(100)" json:"custom"`
 	Custom2         string `xorm:"custom2 text" json:"custom2"`
 	Custom3         string `xorm:"custom3 text" json:"custom3"`
@@ -871,7 +872,7 @@ func UpdateUser(id string, user *User, columns []string, isAdmin bool) (bool, er
 			"eveonline", "fitbit", "gitea", "heroku", "influxcloud", "instagram", "intercom", "kakao", "lastfm", "mailru", "meetup",
 			"microsoftonline", "naver", "nextcloud", "onedrive", "oura", "patreon", "paypal", "salesforce", "shopify", "soundcloud",
 			"spotify", "strava", "stripe", "type", "telegram", "tiktok", "tumblr", "twitch", "twitter", "typetalk", "uber", "vk", "wepay", "xero", "yahoo",
-			"yammer", "yandex", "zoom", "custom", "need_update_password", "ip_whitelist", "mfa_remember_deadline",
+			"yammer", "yandex", "zoom", "oidc", "custom", "need_update_password", "ip_whitelist", "mfa_remember_deadline",
 			"cart", "application_scopes",
 		}
 
@@ -1272,10 +1273,8 @@ func terminateUserAccess(user *User) error {
 		sessionIds = append(sessionIds, session.SessionId...)
 	}
 
-	// Send OIDC Back-Channel Logout notifications BEFORE expiring tokens,
-	// because SendBackchannelLogout calls GetActiveTokensByUser (expires_in > 0).
 	// The host is empty, so the issuer falls back to the configured origin
-	SendBackchannelLogout(user.Owner, user.Name, "", "")
+	sendBackchannelLogoutForTokens(user, tokens, "", "")
 
 	_, err = ExpireTokenByUser(user.Owner, user.Name)
 	if err != nil {
@@ -1311,6 +1310,11 @@ func DeleteUser(user *User) (bool, error) {
 	}
 
 	_, err = DeleteThirdPartyLinksByUser(user.Owner, user.Name)
+	if err != nil {
+		return false, err
+	}
+
+	err = DeletePasswordHistoryByUser(user.Owner, user.Name)
 	if err != nil {
 		return false, err
 	}
@@ -1461,8 +1465,16 @@ func (user *User) GetFriendlyName() string {
 	}
 }
 
-func isUserIdGlobalAdmin(userId string) bool {
-	return strings.HasPrefix(userId, "built-in/") || IsAppUser(userId)
+func isUserIdGlobalAdmin(userId string) (bool, error) {
+	if strings.HasPrefix(userId, "built-in/") {
+		return true, nil
+	}
+
+	appUser, err := GetAppUser(userId)
+	if err != nil {
+		return false, err
+	}
+	return appUser.IsGlobalAdmin(), nil
 }
 
 func ExtendUserWithRolesAndPermissions(user *User) (err error) {
@@ -1513,15 +1525,20 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 	}
 
 	for _, role := range roles {
+		changed := false
 		for j, u := range role.Users {
 			// u = organization/username
 			roleOwner, roleName, err := util.GetOwnerAndNameFromIdWithError(u)
 			if err != nil {
 				return err
 			}
-			if roleName == oldName {
+			if roleOwner == owner && roleName == oldName {
 				role.Users[j] = util.GetId(roleOwner, newName)
+				changed = true
 			}
+		}
+		if !changed {
+			continue
 		}
 		_, err = session.Where("name=?", role.Name).And("owner=?", role.Owner).Update(role)
 		if err != nil {
@@ -1535,6 +1552,7 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 		return err
 	}
 	for _, permission := range permissions {
+		changed := false
 		for j, u := range permission.Users {
 			if u == "*" {
 				continue
@@ -1545,9 +1563,13 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 			if err != nil {
 				return err
 			}
-			if permName == oldName {
+			if permOwner == owner && permName == oldName {
 				permission.Users[j] = util.GetId(permOwner, newName)
+				changed = true
 			}
+		}
+		if !changed {
+			continue
 		}
 		_, err = session.Where("name=?", permission.Name).And("owner=?", permission.Owner).Update(permission)
 		if err != nil {
@@ -1555,12 +1577,17 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 		}
 	}
 
-	_, err = session.Where(fmt.Sprintf("%s = ?", quoteColumn("user")), oldName).Cols("user").Update(&Resource{User: newName})
+	_, err = session.Where(fmt.Sprintf("owner = ? AND %s = ?", quoteColumn("user")), owner, oldName).Cols("user").Update(&Resource{User: newName})
 	if err != nil {
 		return err
 	}
 
 	_, err = session.Where("owner = ? AND user_name = ?", owner, oldName).Cols("user_name").Update(&ThirdPartyLink{UserName: newName})
+	if err != nil {
+		return err
+	}
+
+	_, err = session.Where("owner = ? AND name = ?", owner, oldName).Cols("name").Update(&PasswordHistory{Name: newName})
 	if err != nil {
 		return err
 	}

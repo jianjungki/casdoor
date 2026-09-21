@@ -35,6 +35,10 @@ const (
 	// applications configured before the rename still store the legacy value.
 	SigninMethodRuleHidePassword       = "Hide password"
 	SigninMethodRuleHidePasswordLegacy = "Hide-Password"
+
+	// SigninMethodRuleMagicLinkSignup lets a magic link sent to an address without an
+	// account create that account, the "Sign in only" rule signs existing users in.
+	SigninMethodRuleMagicLinkSignup = "Sign in or sign up"
 )
 
 func (signinMethod *SigninMethod) IsHidden() bool {
@@ -99,6 +103,7 @@ type Application struct {
 	Type                         string          `xorm:"varchar(20)" json:"type"`
 	Scopes                       []*ScopeItem    `xorm:"mediumtext" json:"scopes"`
 	Logo                         string          `xorm:"varchar(200)" json:"logo"`
+	LogoDark                     string          `xorm:"varchar(200)" json:"logoDark"`
 	Title                        string          `xorm:"varchar(100)" json:"title"`
 	Favicon                      string          `xorm:"varchar(200)" json:"favicon"`
 	Order                        int             `json:"order"`
@@ -336,9 +341,15 @@ func GetApplicationByOrganizationName(organization string) (*Application, error)
 func GetApplicationByUser(user *User) (*Application, error) {
 	if user.SignupApplication != "" {
 		return getApplication("admin", user.SignupApplication)
-	} else {
+	}
+
+	// users without a signup application should get the organization's default one
+	application, err := GetDefaultApplication(util.GetId("admin", user.Owner))
+	if err != nil {
 		return GetApplicationByOrganizationName(user.Owner)
 	}
+
+	return application, nil
 }
 
 func GetApplicationByUserId(userId string) (application *Application, err error) {
@@ -422,6 +433,10 @@ func UpdateApplication(id string, application *Application, isGlobalAdmin bool, 
 		return false, errors.New(i18n.Translate(lang, "auth:Unauthorized operation"))
 	}
 
+	if !isGlobalAdmin {
+		KeepApplicationCustomHtml(application, oldApplication)
+	}
+
 	if name == "app-built-in" {
 		application.Name = name
 	}
@@ -497,6 +512,14 @@ func AddApplication(application *Application) (bool, error) {
 		}
 
 		application.TokenFormat = tokenFormat
+	}
+	if len(application.TokenFields) == 0 {
+		tokenFields, err := GetDefaultTokenFields(application.Organization)
+		if err != nil {
+			return false, err
+		}
+
+		application.TokenFields = tokenFields
 	}
 
 	app, err := GetApplicationByClientId(application.ClientId)

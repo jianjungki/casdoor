@@ -154,16 +154,20 @@ func addSyncerJob(syncer *Syncer) error {
 
 	err := syncer.initAdapter()
 	if err != nil {
+		recordSyncerError(syncer, err)
 		return err
 	}
 
-	// Queue the initial sync instead of blocking the add/update HTTP request.
-	// Errors are logged by runSyncerWithTimeout and do not prevent scheduling.
+	// Sync groups first so that the groups referenced by the synced users already exist.
+	// Queue the initial sync instead of blocking the add/update HTTP request;
+	// errors are logged by runSyncerWithTimeout and do not prevent scheduling.
 	runSyncerAsync(syncer, "initial", func() error {
+		syncer.syncGroupsNoError()
 		if err := syncer.syncUsers(); err != nil {
+			recordSyncerError(syncer, err)
 			return err
 		}
-		return syncer.syncGroups()
+		return nil
 	})
 
 	if syncer.SyncInterval <= 0 {
@@ -175,10 +179,12 @@ func addSyncerJob(syncer *Syncer) error {
 	cron := getCronMap(id)
 	_, err = cron.AddFunc(schedule, func() {
 		runSyncerWithTimeout(syncer, "cron", func() error {
+			syncer.syncGroupsNoError()
 			if err := syncer.syncUsers(); err != nil {
+				recordSyncerError(syncer, err)
 				return err
 			}
-			return syncer.syncGroups()
+			return nil
 		})
 	})
 	if err != nil {

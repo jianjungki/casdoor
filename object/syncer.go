@@ -244,6 +244,15 @@ func updateSyncerLastSync(syncer *Syncer) error {
 	return err
 }
 
+func recordSyncerError(syncer *Syncer, err error) {
+	line := fmt.Sprintf("[%s] %s\n", util.GetCurrentTime(), err.Error())
+	_, err2 := updateSyncerErrorText(syncer, line)
+	if err2 != nil {
+		fmt.Printf("recordSyncerError() error: %s\n", err2.Error())
+	}
+}
+}
+
 func AddSyncer(syncer *Syncer) (bool, error) {
 	affected, err := ormer.Engine.Insert(syncer)
 	if err != nil {
@@ -330,6 +339,13 @@ func RunSyncer(syncer *Syncer) error {
 	err := syncer.initAdapter()
 	if err != nil {
 		return err
+	}
+
+	// Sync groups first so that the groups referenced by the synced users already exist
+	err = syncer.syncGroups()
+	if err != nil {
+		// Log error but don't fail the entire sync
+		fmt.Printf("Warning: syncGroups() error: %s\n", err.Error())
 	}
 
 	return syncer.syncUsers()

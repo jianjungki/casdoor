@@ -107,8 +107,8 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 		}
 	}
 
-	// check whether paid-user have active subscription
-	if user.Type == "paid-user" {
+	// check whether paid-user have active subscription, admins are never locked out by it
+	if user.Type == "paid-user" && !user.IsGlobalAdmin() && !user.IsAdmin {
 		subscriptions, err := object.GetSubscriptionsByUser(user.Owner, user.Name)
 		if err != nil {
 			c.ResponseError(err.Error())
@@ -130,7 +130,7 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 				}
 			}
 			// paid-user does not have active or pending subscription, find the default pricing of application
-			pricing, err := object.GetApplicationDefaultPricing(application.Organization, application.Name)
+			pricing, err := object.GetApplicationDefaultPricing(application.Organization, application.Name, user)
 			if err != nil {
 				c.ResponseError(err.Error())
 				return
@@ -198,7 +198,7 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 		if consentRequired {
 			resp = &Response{Status: "ok", Data: map[string]bool{"required": true}}
 		} else {
-			code, err := object.GetOAuthCode(userId, clientId, form.Provider, form.SigninMethod, responseType, redirectUri, scope, state, nonce, codeChallenge, resource, c.Ctx.Request.Host, c.GetAcceptLanguage())
+			code, err := object.GetOAuthCode(userId, clientId, form.Provider, form.SigninMethod, responseType, redirectUri, scope, state, nonce, codeChallenge, resource, c.Ctx.Input.CruSession.SessionID(context.Background()), c.Ctx.Request.Host, c.GetAcceptLanguage())
 			if err != nil {
 				c.ResponseError(err.Error(), nil)
 				return
@@ -216,7 +216,7 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 			if !valid {
 				resp = &Response{Status: "error", Msg: "error: invalid_scope", Data: ""}
 			} else {
-				token, _ := object.GetTokenByUser(application, user, expandedScope, nonce, c.Ctx.Request.Host)
+				token, _ := object.GetTokenByUser(application, user, expandedScope, nonce, c.Ctx.Input.CruSession.SessionID(context.Background()), c.Ctx.Request.Host)
 				resp = tokenToResponse(token)
 			}
 		}
@@ -334,17 +334,48 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 			}
 		}
 
+		sessionId := c.Ctx.Input.CruSession.SessionID(context.Background())
+		sessionInfo := &object.SessionInfo{
+			SessionId:      sessionId,
+			CreatedTime:    util.GetCurrentTime(),
+			LastActiveTime: util.GetCurrentTime(),
+			Ip:             clientIp,
+			UserAgent:      c.Ctx.Request.UserAgent(),
+		}
+		if sessionData := c.GetSessionData(); sessionData != nil && sessionData.ExpireTime != 0 {
+			sessionInfo.ExpireTime = time.Unix(sessionData.ExpireTime, 0).Format(time.RFC3339)
+		}
+
 		_, err = object.AddSession(&object.Session{
-			Owner:       user.Owner,
-			Name:        user.Name,
-			Application: application.Name,
-			SessionId:   []string{c.Ctx.Input.CruSession.SessionID(context.Background())},
+			Owner:        user.Owner,
+			Name:         user.Name,
+			Application:  application.Name,
+			SessionId:    []string{sessionId},
+			SessionInfos: []*object.SessionInfo{sessionInfo},
 
 			ExclusiveSignin: application.EnableExclusiveSignin,
 		})
 		if err != nil {
 			c.ResponseError(err.Error(), nil)
 			return
+		}
+
+		// The policy comes from the user's organization, a shared application must not impose
+		// the setting of its own organization on the users of another one
+		organization := application.OrganizationObj
+		if organization == nil || organization.Name != user.Owner {
+			organization, err = object.GetOrganizationByUser(user)
+			if err != nil {
+				c.ResponseError(err.Error(), nil)
+				return
+			}
+		}
+		if organization != nil && organization.EnableExclusiveSignin {
+			err = object.EnforceSingleBrowserSession(user, sessionId, c.Ctx.Request.Host)
+			if err != nil {
+				c.ResponseError(err.Error(), nil)
+				return
+			}
 		}
 	}
 
@@ -499,8 +530,9 @@ func getExistUserByBindingRule(providerItem *object.ProviderItem, application *o
 	}
 
 	for _, rule := range *providerItem.BindingRule {
-		// Find existing user with Email
-		if rule == "Email" {
+		// Find existing user with Email, only one the provider vouches for: a provider
+		// account with someone else's unverified email must not take over their account
+		if rule == "Email" && userInfo.EmailVerified {
 			user, err = object.GetUserByField(application.Organization, "email", userInfo.Email)
 			if err != nil {
 				return nil, err
@@ -583,9 +615,19 @@ func (c *ApiController) Login() {
 
 	verificationType := ""
 
-	if authForm.Username != "" {
+	// a magic link posts no username, the one-time token in the link is the credential.
+	// The passcode of a sign-in that already asked for MFA is answered further below
+	isMagicLinkSignin := authForm.SigninMethod == "Magic link" && c.getMfaUserSession() == ""
+
+	if authForm.Username != "" || isMagicLinkSignin {
 		var user *object.User
-		if authForm.SigninMethod == "Face ID" {
+		if isMagicLinkSignin {
+			// the one-time link in the email is the credential, it proves the address
+			user, err = c.checkMagicLinkSignin(&authForm)
+			if err == nil {
+				verificationType = "email"
+			}
+		} else if authForm.SigninMethod == "Face ID" {
 			var application *object.Application
 			application, err = object.GetApplication(fmt.Sprintf("admin/%s", authForm.Application))
 			if err != nil {
@@ -832,6 +874,7 @@ func (c *ApiController) Login() {
 			organization, err = object.GetOrganizationByUser(user)
 			if err != nil {
 				c.ResponseError(err.Error())
+				return
 			}
 
 			if checkMfaEnable(c, user, organization, verificationType) {
@@ -867,6 +910,7 @@ func (c *ApiController) Login() {
 		organization, err = object.GetOrganization(util.GetId("admin", application.Organization))
 		if err != nil {
 			c.ResponseError(c.T(err.Error()))
+			return
 		}
 
 		var provider *object.Provider
@@ -889,11 +933,13 @@ func (c *ApiController) Login() {
 		var token *oauth2.Token
 		if provider.Category == "SAML" {
 			// SAML
-			userInfo, err = object.ParseSamlResponse(authForm.SamlResponse, provider, c.Ctx.Request.Host)
+			samlRequestId, _ := c.GetSession(SamlRequestIdSessionKey).(string)
+			userInfo, err = object.ParseSamlResponse(authForm.SamlResponse, provider, c.Ctx.Request.Host, samlRequestId)
 			if err != nil {
 				c.ResponseError(err.Error())
 				return
 			}
+			c.DelSession(SamlRequestIdSessionKey)
 		} else if provider.Category == "OAuth" || provider.Category == "Web3" {
 			// OAuth
 			idpInfo, err := object.FromProviderToIdpInfo(c.Ctx, provider)
@@ -939,6 +985,15 @@ func (c *ApiController) Login() {
 				return
 			}
 
+			// Apple's name only arrives in the form_post callback, and unsigned, so it
+			// may set the display name but never the username or email used for binding
+			if provider.Type == "Apple" {
+				appleDisplayName := takeAppleDisplayNameCookie(c.Ctx)
+				if appleDisplayName != "" {
+					userInfo.DisplayName = appleDisplayName
+				}
+			}
+
 			if provider.EmailRegex != "" {
 				reg, err := regexp.Compile(provider.EmailRegex)
 				if err != nil {
@@ -947,6 +1002,7 @@ func (c *ApiController) Login() {
 				}
 				if !reg.MatchString(userInfo.Email) {
 					c.ResponseError(c.T("check:Email is invalid"))
+					return
 				}
 			}
 		}
@@ -991,6 +1047,7 @@ func (c *ApiController) Login() {
 					c.ResponseError(err.Error())
 					return
 				}
+				isBoundUser := user != nil
 
 				if user == nil {
 					if !application.EnableSignUp {
@@ -1012,6 +1069,36 @@ func (c *ApiController) Login() {
 					invitationName := ""
 					if invitation != nil {
 						invitationName = invitation.Name
+					}
+
+					userInfo.Email = strings.ToLower(userInfo.Email)
+
+					// an organization must not end up with two users sharing an email or a phone,
+					// the binding rule of the provider decides whether they are the same person
+					if userInfo.Email != "" {
+						var emailUser *object.User
+						emailUser, err = object.GetUserByField(application.Organization, "email", userInfo.Email)
+						if err != nil {
+							c.ResponseError(err.Error())
+							return
+						}
+						if emailUser != nil {
+							c.ResponseError(c.T("check:Email already exists"))
+							return
+						}
+					}
+
+					if userInfo.Phone != "" {
+						var phoneUser *object.User
+						phoneUser, err = object.GetUserByPhoneAndCountryCode(application.Organization, userInfo.Phone, userInfo.CountryCode)
+						if err != nil {
+							c.ResponseError(err.Error())
+							return
+						}
+						if phoneUser != nil {
+							c.ResponseError(c.T("check:Phone already exists"))
+							return
+						}
 					}
 
 					// Handle UseEmailAsUsername for OAuth and Web3
@@ -1063,6 +1150,7 @@ func (c *ApiController) Login() {
 						Avatar:            userInfo.AvatarUrl,
 						Address:           []string{},
 						Email:             userInfo.Email,
+						EmailVerified:     userInfo.EmailVerified,
 						Phone:             userInfo.Phone,
 						CountryCode:       userInfo.CountryCode,
 						Region:            userInfo.CountryCode,
@@ -1125,6 +1213,11 @@ func (c *ApiController) Login() {
 				_, err = linkUserByProvider(user, provider, userInfo.Id)
 				if err != nil {
 					c.ResponseError(err.Error())
+					return
+				}
+
+				// binding to an existing account is a sign-in to it, so its MFA applies
+				if isBoundUser && checkMfaEnable(c, user, organization, verificationType) {
 					return
 				}
 
@@ -1215,6 +1308,7 @@ func (c *ApiController) Login() {
 		organization, err = object.GetOrganization(util.GetId("admin", application.Organization))
 		if err != nil {
 			c.ResponseError(c.T(err.Error()))
+			return
 		}
 
 		if authForm.Passcode != "" {
@@ -1336,14 +1430,19 @@ func (c *ApiController) Login() {
 	c.ServeJSON()
 }
 
+// SamlRequestIdSessionKey holds the ID of the AuthnRequest the browser was sent to the
+// IdP with, so that only the response to it can complete the login.
+const SamlRequestIdSessionKey = "samlRequestId"
+
 func (c *ApiController) GetSamlLogin() {
 	providerId := c.Ctx.Input.Query("id")
 	relayState := c.Ctx.Input.Query("relayState")
-	authURL, method, err := object.GenerateSamlRequest(providerId, relayState, c.Ctx.Request.Host, c.GetAcceptLanguage())
+	authURL, method, requestId, err := object.GenerateSamlRequest(providerId, relayState, c.Ctx.Request.Host, c.GetAcceptLanguage())
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
 	}
+	c.SetSession(SamlRequestIdSessionKey, requestId)
 	c.ResponseOk(authURL, method)
 }
 
@@ -1537,6 +1636,8 @@ func (c *ApiController) GetCaptchaStatus() {
 func (c *ApiController) Callback() {
 	code := c.GetString("code")
 	state := c.GetString("state")
+
+	setAppleDisplayNameCookie(c.Ctx, getAppleDisplayName(c.GetString("user")))
 
 	frontendCallbackUrl := fmt.Sprintf("/callback?code=%s&state=%s", url.QueryEscape(code), url.QueryEscape(state))
 	c.Ctx.Redirect(http.StatusFound, frontendCallbackUrl)

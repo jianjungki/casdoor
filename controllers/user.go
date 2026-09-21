@@ -230,10 +230,8 @@ func (c *ApiController) GetUser() {
 		return
 	}
 
-	requestUserId := c.GetSessionUsername()
-	isApplicationRequest := object.IsAppUser(requestUserId)
-	isAdmin := c.IsAdmin() || isApplicationRequest
-	isAdminOrSelf := c.IsAdminOrSelf(user) || isApplicationRequest
+	isAdmin := c.IsAdminOf(user)
+	isAdminOrSelf := c.IsAdminOrSelf(user)
 	user, err = object.GetMaskedUser(user, isAdminOrSelf)
 	if err != nil {
 		c.ResponseError(err.Error())
@@ -648,9 +646,13 @@ func (c *ApiController) SetPassword() {
 		return
 	}
 
-	// Check if the new password is the same as the current password
-	if !object.CheckPasswordNotSameAsCurrent(targetUser, newPassword, organization) {
-		c.ResponseError(c.T("user:The new password must be different from your current password"))
+	msg, err = object.CheckPasswordReuse(targetUser, newPassword, organization, c.GetAcceptLanguage())
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if msg != "" {
+		c.ResponseError(msg)
 		return
 	}
 
@@ -674,6 +676,14 @@ func (c *ApiController) SetPassword() {
 	if code != "" {
 		c.SetSession("verifiedCode", "")
 		c.SetSession("verifiedUserId", "")
+	}
+
+	if user.Ldap == "" {
+		err = targetUser.AddPasswordHistory(organization)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
 	}
 
 	targetUser.Password = newPassword
