@@ -16,7 +16,6 @@ package object
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,7 +23,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/casdoor/casdoor/util"
 )
@@ -144,7 +142,7 @@ type WecomDeptGetResp struct {
 
 // getWecomApi sends a GET request to the WeCom API and returns the response body
 func (p *WecomSyncerProvider) getWecomApi(apiUrl string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiUrl, nil)
@@ -152,7 +150,7 @@ func (p *WecomSyncerProvider) getWecomApi(apiUrl string) ([]byte, error) {
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -169,7 +167,7 @@ func (p *WecomSyncerProvider) postWecomApi(apiUrl string, data map[string]interf
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := syncerHttpContext()
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiUrl, bytes.NewReader(jsonData))
@@ -179,7 +177,7 @@ func (p *WecomSyncerProvider) postWecomApi(apiUrl string, data map[string]interf
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSyncerHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

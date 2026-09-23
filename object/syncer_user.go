@@ -17,8 +17,8 @@ package object
 import (
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/casdoor/casdoor/conf"
 	"github.com/casdoor/casdoor/util"
 )
 
@@ -122,20 +122,68 @@ func (syncer *Syncer) initAdapter() error {
 	return provider.InitAdapter()
 }
 
+const (
+	// syncerEnabledEnv controls whether THIS instance runs the periodic syncers.
+	// In a multi-replica (e.g. Kubernetes) deployment, every replica would
+	// otherwise run every syncer simultaneously, causing duplicate/racing syncs
+	// against the same upstream source. Operators should set this to "true" on
+	// exactly ONE replica and "false" on the rest so only a single replica is
+	// the active syncer worker. Defaults to true (enabled) to preserve existing
+	// single-instance behavior.
+	syncerEnabledEnv = "CASDOOR_SYNCER_ENABLED"
+)
+
+// isSyncerEnabled reports whether this process should act as the sync worker.
+// It defaults to true; set CASDOOR_SYNCER_ENABLED=false on replica pods that
+// must NOT run syncers. An invalid (non-empty, non-bool) value is treated as
+// enabled to avoid accidentally turning syncs off.
+func isSyncerEnabled() bool {
+	raw := conf.GetConfigString(syncerEnabledEnv)
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		fmt.Printf("[syncer] WARN: invalid %s value %q, treating as enabled\n", syncerEnabledEnv, raw)
+		return true
+	}
+}
+
 func RunSyncUsersJob() {
-	syncers, err := GetSyncers("admin")
+	// Only a single replica should run syncers (see isSyncerEnabled). Without
+	// this gate, every replica in a multi-replica deployment would start the
+	// same cron jobs and sync the same upstream source concurrently.
+	if !isSyncerEnabled() {
+		fmt.Printf("[syncer] %s is disabled on this instance, skipping periodic sync scheduling\n", syncerEnabledEnv)
+		return
+	}
+
+	// Schedule jobs for ALL syncers (not just owner "admin"), otherwise a
+	// syncer owned by a non-admin would never be started on boot and would
+	// silently stop syncing.
+	syncers, err := GetSyncers("")
 	if err != nil {
-		fmt.Printf("RunSyncUsersJob() error: %s\n", err.Error())
+		fmt.Printf("RunSyncUsersJob: failed to list syncers: %v\n", err)
 		return
 	}
 
 	// A failing syncer must not stop the others; its error is already in its error text
 	for _, syncer := range syncers {
-		err = addSyncerJob(syncer)
-		if err != nil {
-			fmt.Printf("RunSyncUsersJob() failed to start syncer [%s]: %s\n", syncer.GetId(), err.Error())
-		}
+		// Isolate each syncer: a panic while scheduling one syncer must not
+		// prevent the remaining syncers from being scheduled.
+		func(s *Syncer) {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("RunSyncUsersJob: panic while scheduling syncer %s/%s: %v\n", s.Owner, s.Name, r)
+				}
+			}()
+			if err := addSyncerJob(s); err != nil {
+				fmt.Printf("RunSyncUsersJob: failed to start syncer %s/%s: %v\n", s.Owner, s.Name, err)
+			}
+		}(syncer)
 	}
 
-	time.Sleep(time.Duration(1<<63 - 1))
+	// Keep this goroutine alive (the whole point of the periodic cron jobs).
+	select {}
 }
