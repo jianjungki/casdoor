@@ -5,7 +5,7 @@ import {MapTable} from "@/components/crud/MapTable";
 import {Badge} from "@/components/ui/badge";
 import {SimpleEditPage, type EditField} from "@/components/crud/SimpleEditPage";
 import {useAccount} from "@/hooks/use-account";
-import {useGroupOptions, useOrganizationOptions} from "@/hooks/use-options";
+import {useGroupOptions, useOrganizationOptions, useUserOptions} from "@/hooks/use-options";
 import * as GroupBackend from "@/backend/GroupBackend";
 import * as Setting from "@/lib/setting";
 
@@ -14,6 +14,7 @@ export default function GroupEditPage() {
   const {account} = useAccount();
   const organizations = useOrganizationOptions();
   const groups = useGroupOptions(organizationName);
+  const userList = useUserOptions(organizationName);
   const location = useLocation();
   // the group tree hands over where to return to; kept in a ref because "Save"
   // re-navigates to the saved name and drops the router state
@@ -69,6 +70,14 @@ export default function GroupEditPage() {
           </div>
         );
       },
+    },
+    {
+      type: "multiselect",
+      name: "adminUsers",
+      labelKey: "group:Group admin users",
+      options: () => userList,
+      creatable: true,
+      placeholder: i18next.t("group:Select admin users for this group"),
     },
     {type: "text", name: "contactEmail", labelKey: "general:Email"},
     {type: "number", name: "gidNumber", labelKey: "general:GID number"},

@@ -3,7 +3,7 @@ import {Link} from "react-router-dom";
 import {Button} from "@/components/ui/button";
 import {CrudListPage} from "@/components/crud/CrudListPage";
 import {XlsxImport} from "@/components/crud/XlsxImport";
-import {dateColumn, linkColumn, organizationColumn, textColumn} from "@/components/crud/columns";
+import {dateColumn, linkColumn, organizationColumn, refsColumn, textColumn} from "@/components/crud/columns";
 import type {ColumnDef} from "@/components/crud/types";
 import {useAccount} from "@/hooks/use-account";
 import {useOrganizationFilter, useRequestOrganization} from "@/hooks/use-organization";
@@ -59,6 +59,7 @@ export default function GroupListPage() {
         </Button>
       ),
     },
+    refsColumn({dataIndex: "adminUsers", title: i18next.t("group:Group admin users"), urlPrefix: "/users", width: 150, sortable: true, searchable: true}),
   ];
 
   return (
