@@ -203,7 +203,7 @@ func IsAllowed(subOwner string, subName string, method string, urlPath string, o
 			return true, nil
 		}
 		if isGroupAdminApi(urlPath) {
-			return isGroupAdmin(user, objOwner)
+			return isGroupAdmin(user, objOwner), nil
 		}
 	}
 

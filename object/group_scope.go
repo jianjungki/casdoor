@@ -287,7 +287,7 @@ func GetPaginationManagedUsers(owner, username string, offset, limit int, field,
 	if sortField == "" || sortOrder == "" || !util.FilterField(sortField) {
 		sortField = "created_time"
 	}
-	orderQuery := fmt.Sprintf("%s.%s", prefixedUserTable, util.SnakeString(sortField))
+	orderQuery := fmt.Sprintf("%s.%s", prefixedUserTable, util.CamelToSnakeCase(sortField))
 	if sortOrder == "ascend" {
 		session = session.Asc(orderQuery)
 	} else {

@@ -467,7 +467,9 @@ func (c *ApiController) UpdateUser() {
 
 	columns := []string{}
 	if columnsStr != "" {
-		columns = strings.Split(columnsStr, ",")
+		for _, col := range strings.Split(columnsStr, ",") {
+			columns = append(columns, util.CamelToSnakeCase(col))
+		}
 	}
 
 	isGroupAdmin, err := c.canGroupAdminManageUser(oldUser)
@@ -485,13 +487,6 @@ func (c *ApiController) UpdateUser() {
 	if pass, err := object.CheckPermissionForUpdateUser(oldUser, &user, isAdmin, allowDisplayNameEmpty, c.GetAcceptLanguage()); !pass {
 		c.ResponseError(err)
 		return
-	}
-
-	columns := []string{}
-	if columnsStr != "" {
-		for _, col := range strings.Split(columnsStr, ",") {
-			columns = append(columns, util.CamelToSnakeCase(col))
-		}
 	}
 
 	if isGroupAdmin && !c.IsAdmin() {
