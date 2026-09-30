@@ -53,12 +53,20 @@ func validateGroupAdminUsers(group *Group) error {
 	}
 
 	for _, username := range group.AdminUsers {
-		user, err := GetUser(util.GetId(group.Owner, username))
+		// username may already be in "owner/name" format (from frontend select
+		// component) or just a bare name; only prepend the group owner when
+		// needed.
+		userid := username
+		if !strings.Contains(userid, "/") {
+			userid = util.GetId(group.Owner, userid)
+		}
+
+		user, err := GetUser(userid)
 		if err != nil {
 			return err
 		}
 		if user == nil {
-			return fmt.Errorf("the admin user: %s doesn't exist", util.GetId(group.Owner, username))
+			return fmt.Errorf("the admin user: %s doesn't exist", userid)
 		}
 	}
 
