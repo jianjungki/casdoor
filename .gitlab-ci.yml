@@ -19,12 +19,12 @@ variables:
   CASDOOR_IMAGE_NAME: casdoor
   IMAGE_TAG: latest
   IMAGE_TAG_COMMIT: $CI_COMMIT_SHORT_SHA
-  # Harbor Docker Hub proxy cache. The runner cannot reach registry-1.docker.io.
-  HARBOR_DOCKER_PROXY: test-harbor.vzoom.com/docker/library
-  NODE_IMAGE: $HARBOR_DOCKER_PROXY/node:20.20.1
-  GO_IMAGE: $HARBOR_DOCKER_PROXY/golang:1.25.8
-  ALPINE_IMAGE: $HARBOR_DOCKER_PROXY/alpine:latest
-  DEBIAN_IMAGE: $HARBOR_DOCKER_PROXY/debian:latest
+  # Full paths: GitLab may leave nested $HARBOR_DOCKER_PROXY empty, and an
+  # empty --build-arg would override the Dockerfile default with a blank image.
+  NODE_IMAGE: "test-harbor.vzoom.com/docker/library/node:20.20.1"
+  GO_IMAGE: "test-harbor.vzoom.com/docker/library/golang:1.25.8"
+  ALPINE_IMAGE: "test-harbor.vzoom.com/docker/library/alpine:latest"
+  DEBIAN_IMAGE: "test-harbor.vzoom.com/docker/library/debian:latest"
 
 stages:
   - build

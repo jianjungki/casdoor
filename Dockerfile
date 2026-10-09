@@ -1,4 +1,8 @@
 ARG NODE_IMAGE=node:20.20.1
+ARG GO_IMAGE=golang:1.25.8
+ARG ALPINE_IMAGE=alpine:latest
+ARG DEBIAN_IMAGE=debian:latest
+
 FROM ${NODE_IMAGE} AS FRONT
 WORKDIR /web
 
@@ -10,7 +14,6 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000
 COPY ./web .
 RUN NODE_OPTIONS="--max-old-space-size=4096" yarn run build
 
-ARG GO_IMAGE=golang:1.25.8
 FROM ${GO_IMAGE} AS BACK
 # GOPROXY to avoid timeouts when fetching Go packages during the build.
 # It can be overridden at build time with:
@@ -29,7 +32,6 @@ COPY . .
 RUN go test -v -run TestGetVersionInfo ./util/system_test.go ./util/system.go ./util/variable.go
 RUN ./build.sh
 
-ARG ALPINE_IMAGE=alpine:latest
 FROM ${ALPINE_IMAGE} AS STANDARD
 LABEL MAINTAINER="https://casdoor.org/"
 ARG USER=casdoor
@@ -59,7 +61,6 @@ COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 ENTRYPOINT ["/server"]
 
 
-ARG DEBIAN_IMAGE=debian:latest
 FROM ${DEBIAN_IMAGE} AS ALLINONE
 LABEL MAINTAINER="https://casdoor.org/"
 ARG TARGETOS
