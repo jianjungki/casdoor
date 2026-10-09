@@ -202,10 +202,12 @@ export default function GroupTreePage() {
             >
               {i18next.t("group:Show all")}
             </Button>
-            <Button onClick={() => addGroup(true)}>
-              <Plus />
-              {i18next.t("general:Add")}
-            </Button>
+            {Setting.isLocalAdminUser(account) ? (
+              <Button onClick={() => addGroup(true)}>
+                <Plus />
+                {i18next.t("general:Add")}
+              </Button>
+            ) : null}
             <Button variant="outline" asChild>
               <Link to="/groups">{i18next.t("general:Groups")}</Link>
             </Button>

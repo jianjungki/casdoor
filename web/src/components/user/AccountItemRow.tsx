@@ -3,6 +3,7 @@ import {FormRow} from "@/components/crud/FormRow";
 import {
   type AccountItem,
   type AccountItemRules,
+  canGroupManagerEditAccountItem,
   checkAccountItemRegex,
   getAccountItemMap,
   isAccountItemDisabled,
@@ -24,6 +25,7 @@ const AccountItemsContext = React.createContext<AccountItemsContextValue>({
   items: {},
   unconfigured: true,
   isAdmin: false,
+  isManager: false,
   isSelfOrAdmin: false,
   user: null,
 });
@@ -31,12 +33,14 @@ const AccountItemsContext = React.createContext<AccountItemsContextValue>({
 export function AccountItemsProvider({
   organization,
   isAdmin,
+  isManager = false,
   isSelfOrAdmin,
   user,
   children,
 }: {
   organization: any;
   isAdmin: boolean;
+  isManager?: boolean;
   isSelfOrAdmin: boolean;
   user: any;
   children: React.ReactNode;
@@ -47,18 +51,27 @@ export function AccountItemsProvider({
       items,
       unconfigured: Object.keys(items).length === 0,
       isAdmin,
+      isManager,
       isSelfOrAdmin,
       user,
     };
-  }, [organization, isAdmin, isSelfOrAdmin, user]);
+  }, [organization, isAdmin, isManager, isSelfOrAdmin, user]);
 
   return <AccountItemsContext.Provider value={value}>{children}</AccountItemsContext.Provider>;
 }
 
 export function useAccountItem(name?: string) {
   const ctx = React.useContext(AccountItemsContext);
-  if (!name || ctx.unconfigured) {
+  if (!name) {
     return {visible: true, disabled: false, item: undefined as AccountItem | undefined};
+  }
+  if (ctx.unconfigured) {
+    const managerCanEdit = Boolean(ctx.isManager && canGroupManagerEditAccountItem(name));
+    return {
+      visible: !ctx.isManager || managerCanEdit,
+      disabled: Boolean(ctx.isManager && !managerCanEdit),
+      item: undefined as AccountItem | undefined,
+    };
   }
   const item = ctx.items[name];
   return {

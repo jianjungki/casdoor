@@ -42,6 +42,27 @@ func normalizeGroupAdminUsers(adminUsers []string) []string {
 	return res
 }
 
+// isUserInAdminUsers reports whether username (a bare name such as "testuser1")
+// is listed as a group admin. group.AdminUsers may store either a bare name
+// (from an old row or a handcrafted API call) or an "owner/name" id (the value
+// the frontend select submits), so the comparison normalizes both sides to the
+// bare name before matching.
+func isUserInAdminUsers(group *Group, username string) bool {
+	if group == nil || username == "" {
+		return false
+	}
+	for _, adminUser := range group.AdminUsers {
+		name := strings.TrimSpace(adminUser)
+		if strings.Contains(name, "/") {
+			_, name = util.GetOwnerAndNameFromIdNoCheck(name)
+		}
+		if name == username {
+			return true
+		}
+	}
+	return false
+}
+
 func validateGroupAdminUsers(group *Group) error {
 	if group == nil {
 		return nil
@@ -91,7 +112,7 @@ func GetManagedGroupsByUser(owner string, username string) ([]*Group, error) {
 	managed := map[string]*Group{}
 	queue := make([]*Group, 0)
 	for _, group := range groups {
-		if util.InSlice(group.AdminUsers, username) {
+		if isUserInAdminUsers(group, username) {
 			managed[group.GetId()] = group
 			queue = append(queue, group)
 		}
@@ -129,7 +150,7 @@ func HasManagedGroupsByUser(owner string, username string) (bool, error) {
 	}
 
 	for _, group := range groups {
-		if util.InSlice(group.AdminUsers, username) {
+		if isUserInAdminUsers(group, username) {
 			return true, nil
 		}
 	}
@@ -318,14 +339,7 @@ func CanUserManageTargetUser(owner string, username string, targetUser *User) (b
 		return false, nil
 	}
 
-	managedGroups, err := GetManagedGroupIdsByUser(owner, username)
-	if err != nil {
-		return false, err
-	}
-	if len(managedGroups) == 0 {
-		return false, nil
-	}
-	return util.HaveIntersection(targetUser.Groups, managedGroups), nil
+	return CanUserManageAllGroups(owner, username, targetUser.Groups)
 }
 
 func CanUserManageAllGroups(owner string, username string, groupIds []string) (bool, error) {

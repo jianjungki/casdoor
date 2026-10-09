@@ -5,7 +5,7 @@ import {Badge} from "@/components/ui/badge";
 import {Avatar, AvatarFallback, AvatarImage} from "@/components/ui/avatar";
 import {CrudListPage} from "@/components/crud/CrudListPage";
 import {XlsxImport} from "@/components/crud/XlsxImport";
-import {boolColumn, dateColumn, linkColumn, organizationColumn, textColumn} from "@/components/crud/columns";
+import {boolColumn, dateColumn, organizationColumn, textColumn} from "@/components/crud/columns";
 import type {ColumnDef} from "@/components/crud/types";
 import {useAccount} from "@/hooks/use-account";
 import {useRequestOrganization} from "@/hooks/use-organization";
@@ -36,6 +36,7 @@ export default function UserListPage({
   const isProtected = (record: any) =>
     (record.owner === account?.owner && record.name === account?.name) ||
     (record.owner === "built-in" && record.name === "admin");
+  const canManage = (record: any) => Setting.isLocalAdminUser(account) || record.canManage === true;
 
   const [organization, setOrganization] = React.useState<any>({});
 
@@ -77,7 +78,20 @@ export default function UserListPage({
           </Link>
         ) : null,
     },
-    linkColumn({dataIndex: "name", to: (r) => `/users/${r.owner}/${r.name}`, width: 150}),
+    {
+      dataIndex: "name",
+      title: i18next.t("general:Name"),
+      width: 150,
+      fixed: "left",
+      sortable: true,
+      searchable: true,
+      render: (value, record) =>
+        canManage(record) ? (
+          <Link to={`/users/${record.owner}/${record.name}`} className="font-medium text-foreground underline-offset-4 hover:underline">
+            {value}
+          </Link>
+        ) : value,
+    },
     dateColumn(),
     textColumn({dataIndex: "displayName", title: i18next.t("general:Display name"), searchable: true, width: 150}),
     {
@@ -196,7 +210,8 @@ export default function UserListPage({
           )
       }
       newRecord={account ? () => newUser(account, organization, organizationName, groupName) : undefined}
-      deleteDisabled={isProtected}
+      deleteDisabled={(record) => isProtected(record) || !canManage(record)}
+      editDisabled={(record) => !canManage(record)}
       editUrl={(r) => `/users/${r.owner}/${r.name}`}
       remove={(r) => UserBackend.deleteUser(r)}
       rowActions={(record, _index, {refresh}) => [
@@ -207,7 +222,7 @@ export default function UserListPage({
             onSelect: () => {
               UserBackend.impersonateUser(record.owner, record.name).then((res: any) => {
                 if (res.status === "ok") {
-                  navigate("/");
+                  navigate("/", {replace: true});
                   window.location.reload();
                 } else {
                   Setting.showMessage("error", res.msg);

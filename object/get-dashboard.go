@@ -31,6 +31,24 @@ type DashboardMapItem struct {
 	itemCount          int64
 }
 
+// getDashboardFilterColumn returns the column used to scope dashboard counts to an organization.
+// Most tables store the owning organization in the "owner" column, but a few store it differently:
+//   - the organization table stores the org name in "name" (its owner column is "admin")
+//   - the application table stores the actual organization in "organization" (its owner column is "admin")
+//
+// Other global tables (provider/token/cert/model/...) have no organization linkage and keep using
+// "owner", which naturally yields 0 for a scoped admin since those resources are global & not manageable.
+func getDashboardFilterColumn(tableName string) string {
+	switch tableName {
+	case "organization":
+		return "name"
+	case "application":
+		return "organization"
+	default:
+		return "owner"
+	}
+}
+
 func GetDashboard(owner string) (*map[string][]int64, error) {
 	if owner == "All" {
 		owner = ""
@@ -63,8 +81,9 @@ func GetDashboard(owner string) (*map[string][]int64, error) {
 			dbQueryAfter := ormer.Engine.Cols("created_time")
 
 			if owner != "" {
-				dbQueryAfter = dbQueryAfter.And("owner = ?", owner)
-				dbQueryBefore = dbQueryBefore.And("owner = ?", owner)
+				filterColumn := getDashboardFilterColumn(tableName)
+				dbQueryAfter = dbQueryAfter.And(filterColumn+" = ?", owner)
+				dbQueryBefore = dbQueryBefore.And(filterColumn+" = ?", owner)
 			}
 
 			if countResult, err = dbQueryBefore.And("created_time < ?", time30day).Table(tableFullName).Count(); err != nil {

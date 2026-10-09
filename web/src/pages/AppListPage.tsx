@@ -7,6 +7,7 @@ import {Loading} from "@/components/common/Loading";
 import {PageHeader} from "@/components/crud/PageHeader";
 import {useAccount} from "@/hooks/use-account";
 import * as ApplicationBackend from "@/backend/ApplicationBackend";
+import * as Setting from "@/lib/setting";
 import {cn} from "@/lib/utils";
 
 /** the antd page's generateTagColor(): a djb2 hash into a fixed palette */
@@ -24,6 +25,28 @@ function tagColor(tag: string) {
     hash = (hash * 33) ^ tag.charCodeAt(i);
   }
   return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
+}
+
+/**
+ * Where an app card should take the visitor. An application with a real
+ * homepage opens itself; a `<custom-url>` app falls back to the signed-in
+ * account's own homepage; and an app with neither (a freshly created test app)
+ * falls back to its sign-in page, as the pre-shadcn card did, so clicking a
+ * homepage-less app still lands somewhere instead of reloading /apps.
+ */
+function resolveAppLink(application: any, account: any): string {
+  const homepage = application?.homepageUrl;
+  if (homepage && homepage !== "<custom-url>") {
+    return homepage;
+  }
+  if (account?.homepage) {
+    return account.homepage;
+  }
+  const login = Setting.getLoginLink(application);
+  if (login && !login.startsWith("<")) {
+    return login;
+  }
+  return "/login";
 }
 
 export default function AppListPage() {
@@ -58,7 +81,7 @@ export default function AppListPage() {
 
   const items: GridCardItem[] = filtered.map((application: any) => ({
     // the card opens the application itself, not Casdoor's sign-in page
-    link: application.homepageUrl === "<custom-url>" ? account?.homepage ?? "" : application.homepageUrl,
+    link: resolveAppLink(application, account),
     name: application.displayName || application.name,
     description: application.description,
     logo: application.logo,

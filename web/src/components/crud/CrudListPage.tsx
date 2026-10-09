@@ -33,6 +33,8 @@ export interface CrudListPageProps<T extends Record<string, any>> {
   remove?: (record: T) => Promise<any>;
   /** where the "Add" flow and the name links point at */
   editUrl?: (record: T) => string;
+  /** blocks Edit for one row, optionally with a tooltip explanation */
+  editDisabled?: (record: T) => string | boolean | undefined;
   addButtonLabel?: React.ReactNode;
   /** extra buttons next to Refresh/Add; a function form gets `refresh` to re-fetch the list */
   toolbar?: React.ReactNode | ((ctx: {refresh: () => void}) => React.ReactNode);
@@ -86,6 +88,7 @@ export function CrudListPage<T extends Record<string, any>>({
   add,
   remove,
   editUrl,
+  editDisabled,
   addButtonLabel,
   toolbar,
   rowKey,
@@ -193,6 +196,8 @@ export function CrudListPage<T extends Record<string, any>>({
                 ? {
                   key: "edit",
                   label: i18next.t(readOnly ? "general:View" : "general:Edit"),
+                  description: typeof editDisabled?.(record) === "string" ? editDisabled(record) as string : undefined,
+                  disabled: Boolean(editDisabled?.(record)),
                   onSelect: () => navigate(editUrl(record), readOnly ? {state: {mode: "view"}} : undefined),
                 }
                 : null,
@@ -204,7 +209,7 @@ export function CrudListPage<T extends Record<string, any>>({
       },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, formItems, editUrl, remove, rowActions, showActionColumn, readOnly, deleteDisabled, rows, query.page, refresh]);
+  }, [columns, formItems, editUrl, editDisabled, remove, rowActions, showActionColumn, readOnly, deleteDisabled, rows, query.page, refresh]);
 
   const deleteSelected = async() => {
     const records = (rows ?? []).filter((row, index) => selected.has(keyOf(row, index)) && !deleteDisabled?.(row));

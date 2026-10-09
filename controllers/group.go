@@ -233,12 +233,48 @@ func (c *ApiController) GetGroup() {
 // @router /update-group [post]
 func (c *ApiController) UpdateGroup() {
 	id := c.Ctx.Input.Query("id")
-
-	var group object.Group
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &group)
+	owner, name, err := util.GetOwnerAndNameFromIdWithError(id)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
+	}
+
+	var group object.Group
+	err = json.Unmarshal(c.Ctx.Input.RequestBody, &group)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	if !c.IsAdmin() {
+		currentUser := c.requireOrganizationAccess(owner)
+		if currentUser == nil {
+			return
+		}
+		allowed, err := object.CanUserManageGroup(owner, currentUser.Name, name)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+
+		oldGroup, err := object.GetGroup(id)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if oldGroup == nil {
+			c.ResponseError(fmt.Sprintf(c.T("general:The group: %s doesn't exist"), id))
+			return
+		}
+		group.Owner = oldGroup.Owner
+		group.Name = oldGroup.Name
+		group.ParentId = oldGroup.ParentId
+		group.IsTopGroup = oldGroup.IsTopGroup
+		group.CreatedTime = oldGroup.CreatedTime
 	}
 
 	c.Data["json"] = wrapActionResponse(object.UpdateGroup(id, &group, c.IsGlobalAdmin(), c.GetAcceptLanguage()))
@@ -260,8 +296,29 @@ func (c *ApiController) AddGroup() {
 		return
 	}
 
-	if !c.requireOrganizationPermission(group.Owner) {
-		return
+	if c.IsAdmin() {
+		if !c.requireOrganizationPermission(group.Owner) {
+			return
+		}
+	} else {
+		currentUser := c.requireOrganizationAccess(group.Owner)
+		if currentUser == nil {
+			return
+		}
+		if group.ParentId == "" || group.ParentId == group.Owner {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+		allowed, err := object.CanUserManageGroup(group.Owner, currentUser.Name, group.ParentId)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+		group.IsTopGroup = false
 	}
 
 	c.Data["json"] = wrapActionResponse(object.AddGroup(&group))
@@ -283,6 +340,31 @@ func (c *ApiController) DeleteGroup() {
 		return
 	}
 
-	c.Data["json"] = wrapActionResponse(object.DeleteGroup(&group))
+	targetGroup, err := object.GetGroup(group.GetId())
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if targetGroup == nil {
+		c.ResponseError(fmt.Sprintf(c.T("general:The group: %s doesn't exist"), group.GetId()))
+		return
+	}
+	if !c.IsAdmin() {
+		currentUser := c.requireOrganizationAccess(targetGroup.Owner)
+		if currentUser == nil {
+			return
+		}
+		allowed, err := object.CanUserManageGroup(targetGroup.Owner, currentUser.Name, targetGroup.Name)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+	}
+
+	c.Data["json"] = wrapActionResponse(object.DeleteGroup(targetGroup))
 	c.ServeJSON()
 }

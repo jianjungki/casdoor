@@ -44,6 +44,87 @@ func (c *ApiController) canGroupAdminManageUser(user *object.User) (bool, error)
 	return object.CanUserManageTargetUser(user.Owner, currentUser.Name, user)
 }
 
+func setGroupAdminCanManageUsers(owner string, username string, users []*object.User) error {
+	for _, user := range users {
+		canManage, err := object.CanUserManageTargetUser(owner, username, user)
+		if err != nil {
+			return err
+		}
+		user.CanManage = canManage
+	}
+	return nil
+}
+
+func getGroupAdminUserUpdate(oldUser *object.User, requested *object.User) (*object.User, []string) {
+	user := *oldUser
+	user.Name = requested.Name
+	user.DisplayName = requested.DisplayName
+	user.FirstName = requested.FirstName
+	user.LastName = requested.LastName
+	user.Avatar = requested.Avatar
+	user.Type = requested.Type
+	user.Email = requested.Email
+	user.Phone = requested.Phone
+	user.CountryCode = requested.CountryCode
+	user.Region = requested.Region
+	user.Location = requested.Location
+	user.Address = requested.Address
+	user.Addresses = requested.Addresses
+	user.Affiliation = requested.Affiliation
+	user.Title = requested.Title
+	user.Homepage = requested.Homepage
+	user.Bio = requested.Bio
+	user.Tag = requested.Tag
+	user.Language = requested.Language
+	user.Gender = requested.Gender
+	user.Birthday = requested.Birthday
+	user.Education = requested.Education
+	user.Properties = requested.Properties
+	user.Groups = requested.Groups
+
+	columns := []string{
+		"name", "display_name", "first_name", "last_name", "avatar", "type",
+		"email", "phone", "country_code", "region", "location", "address",
+		"addresses", "affiliation", "title", "homepage", "bio", "tag",
+		"language", "gender", "birthday", "education", "properties", "groups",
+	}
+	return &user, columns
+}
+
+func getGroupAdminNewUser(requested *object.User) *object.User {
+	return &object.User{
+		Owner:             requested.Owner,
+		Name:              requested.Name,
+		Type:              requested.Type,
+		Password:          requested.Password,
+		DisplayName:       requested.DisplayName,
+		FirstName:         requested.FirstName,
+		LastName:          requested.LastName,
+		Avatar:            requested.Avatar,
+		Email:             requested.Email,
+		Phone:             requested.Phone,
+		CountryCode:       requested.CountryCode,
+		Region:            requested.Region,
+		Location:          requested.Location,
+		Address:           requested.Address,
+		Addresses:         requested.Addresses,
+		Affiliation:       requested.Affiliation,
+		Title:             requested.Title,
+		Homepage:          requested.Homepage,
+		Bio:               requested.Bio,
+		Tag:               requested.Tag,
+		Language:          requested.Language,
+		Gender:            requested.Gender,
+		Birthday:          requested.Birthday,
+		Education:         requested.Education,
+		SignupApplication: requested.SignupApplication,
+		RegisterType:      requested.RegisterType,
+		RegisterSource:    requested.RegisterSource,
+		Properties:        requested.Properties,
+		Groups:            requested.Groups,
+	}
+}
+
 // GetGlobalUsers
 // @Title GetGlobalUsers
 // @Tag User API
@@ -142,8 +223,9 @@ func (c *ApiController) GetUsers() {
 				return
 			}
 
-			for _, user := range users {
-				user.CanManage = true
+			if err = setGroupAdminCanManageUsers(owner, currentUser.Name, users); err != nil {
+				c.ResponseError(err.Error())
+				return
 			}
 
 			c.ResponseOk(users)
@@ -201,8 +283,9 @@ func (c *ApiController) GetUsers() {
 				return
 			}
 
-			for _, user := range users {
-				user.CanManage = true
+			if err = setGroupAdminCanManageUsers(owner, currentUser.Name, users); err != nil {
+				c.ResponseError(err.Error())
+				return
 			}
 
 			c.ResponseOk(users, paginator.Nums())
@@ -510,10 +593,9 @@ func (c *ApiController) UpdateUser() {
 			return
 		}
 
-		user.Owner = oldUser.Owner
-		user.IsAdmin = oldUser.IsAdmin
-		user.IsForbidden = oldUser.IsForbidden
-		user.IsDeleted = oldUser.IsDeleted
+		sanitizedUser, allowedColumns := getGroupAdminUserUpdate(oldUser, &user)
+		user = *sanitizedUser
+		columns = allowedColumns
 	}
 
 	affected, err := object.UpdateUser(id, &user, columns, isAdmin)
@@ -589,7 +671,7 @@ func (c *ApiController) AddUser() {
 			c.ResponseError(c.T("auth:Unauthorized operation"))
 			return
 		}
-		user.IsAdmin = false
+		user = *getGroupAdminNewUser(&user)
 	} else if !c.IsAdmin() {
 		c.ResponseError(c.T("auth:Unauthorized operation"))
 		return
@@ -1021,27 +1103,21 @@ func (c *ApiController) RemoveUserFromGroup() {
 			return
 		}
 
-		canManageAnyUser, err = c.canGroupAdminManageUser(targetUser)
-		if err != nil {
-			c.ResponseError(err.Error())
-			return
-		}
-	}
-	res, msg := object.CheckAccountItemModifyRule(item, canManageAnyUser, c.GetAcceptLanguage())
-	if !res {
-		c.ResponseError(msg)
-		return
-	}
-	if !c.IsAdmin() {
 		allowed, err := object.CanUserManageGroup(owner, currentUser.Name, groupName)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
-		if !allowed {
+		if !allowed || !util.InSlice(targetUser.Groups, util.GetId(owner, groupName)) {
 			c.ResponseError(c.T("auth:Unauthorized operation"))
 			return
 		}
+		canManageAnyUser = true
+	}
+	res, msg := object.CheckAccountItemModifyRule(item, canManageAnyUser, c.GetAcceptLanguage())
+	if !res {
+		c.ResponseError(msg)
+		return
 	}
 
 	affected, err := object.DeleteGroupForUser(util.GetId(owner, name), util.GetId(owner, groupName))

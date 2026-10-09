@@ -41,7 +41,7 @@ export function Header({onOpenPalette}: {onOpenPalette: () => void}) {
     UserBackend.exitImpersonateUser(account.owner, account.name).then((res: any) => {
       if (res.status === "ok") {
         Setting.showMessage("success", i18next.t("account:Exit impersonation"));
-        navigate("/");
+        navigate("/", {replace: true});
         window.location.reload();
       } else {
         Setting.showMessage("error", res.msg);

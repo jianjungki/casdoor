@@ -1,7 +1,7 @@
 import * as React from "react";
 import i18next from "i18next";
 import {AppWindow, Building2, KeyRound, Plug, UserPlus, Users} from "lucide-react";
-import {Link, useNavigate} from "react-router-dom";
+import {Link} from "react-router-dom";
 import {
   Cell,
   CartesianGrid,
@@ -85,7 +85,10 @@ function StatCard({title, value, icon, to}: {title: string; value: number; icon:
  * `getOrganizationName()` in web/src/basic/Dashboard.js.
  */
 function getDashboardOrganization(account: any): string {
-  if (!Setting.isAdminUser(account) && Setting.isLocalAdminUser(account)) {
+  // Global admins may browse any organization ("All"); org admins and group
+  // (scoped) admins are pinned to their own organization, otherwise the owner
+  // query would be empty and the backend rejects it for a non-global admin.
+  if (!Setting.isAdminUser(account)) {
     return account.owner;
   }
   const stored = Setting.getOrganization();
@@ -94,19 +97,14 @@ function getDashboardOrganization(account: any): string {
 
 export default function Dashboard() {
   const {account} = useAccount();
-  const navigate = useNavigate();
   const [data, setData] = React.useState<any>(null);
   const [providerData, setProviderData] = React.useState<any[] | null>(null);
   const [mfaData, setMfaData] = React.useState<any>(null);
   const [heatmapData, setHeatmapData] = React.useState<any>(null);
   const [loading, setLoading] = React.useState(true);
 
-  // a regular user has no dashboard; antd sends them to the first page their
-  // organization leaves them
-  const isConsoleAdmin = Setting.isLocalAdminUser(account);
-
   const load = React.useCallback(() => {
-    if (!account || !Setting.isLocalAdminUser(account)) {
+    if (!account) {
       return;
     }
     const org = getDashboardOrganization(account);
@@ -141,20 +139,14 @@ export default function Dashboard() {
   }, [account]);
 
   React.useEffect(() => {
-    if (!account || isConsoleAdmin) {
-      load();
+    if (!account) {
       return;
     }
-    const navItems = account.organization?.userNavItems;
-    const isAllEnabled = !Array.isArray(navItems) || navItems.includes("all");
-    if (isAllEnabled || navItems.includes("/apps")) {
-      navigate("/apps", {replace: true});
-    } else if (navItems.includes("/shortcuts")) {
-      navigate("/shortcuts", {replace: true});
-    } else {
-      navigate("/account", {replace: true});
-    }
-  }, [account, isConsoleAdmin, load, navigate]);
+    // Every signed-in user lands on the data dashboard. Global/org admins and
+    // group admins already did; now regular users also see their own
+    // organization's statistics (the backend only allows their own org).
+    load();
+  }, [account, load]);
 
   React.useEffect(() => {
     window.addEventListener("storageOrganizationChanged", load);

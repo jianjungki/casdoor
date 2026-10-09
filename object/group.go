@@ -468,8 +468,20 @@ func GetGroupAdminUserDetails(group *Group) ([]*User, error) {
 		return []*User{}, nil
 	}
 
+	// group.AdminUsers may hold "owner/name" ids (the frontend select submits
+	// them) while the user table's "name" column holds bare names, so normalize
+	// every entry to the bare name before querying.
+	names := make([]string, 0, len(group.AdminUsers))
+	for _, adminUser := range group.AdminUsers {
+		name := strings.TrimSpace(adminUser)
+		if strings.Contains(name, "/") {
+			_, name = util.GetOwnerAndNameFromIdNoCheck(name)
+		}
+		names = append(names, name)
+	}
+
 	users := []*User{}
-	err := ormer.Engine.Where("owner = ?", group.Owner).In("name", group.AdminUsers).Find(&users)
+	err := ormer.Engine.Where("owner = ?", group.Owner).In("name", names).Find(&users)
 	if err != nil {
 		return nil, err
 	}
@@ -479,8 +491,8 @@ func GetGroupAdminUserDetails(group *Group) ([]*User, error) {
 		userMap[user.Name] = user
 	}
 
-	adminUsers := make([]*User, 0, len(group.AdminUsers))
-	for _, username := range group.AdminUsers {
+	adminUsers := make([]*User, 0, len(names))
+	for _, username := range names {
 		user, ok := userMap[username]
 		if !ok {
 			continue

@@ -15,6 +15,7 @@ export default function GroupListPage() {
   const {account} = useAccount();
   const organizationName = useRequestOrganization();
   const organizationFilter = useOrganizationFilter();
+  const canCreateTopLevelGroup = Setting.isLocalAdminUser(account);
 
   const columns: ColumnDef<any>[] = [
     linkColumn({dataIndex: "name", to: (r) => `/groups/${r.owner}/${r.name}`}),
@@ -72,13 +73,15 @@ export default function GroupListPage() {
           <Button variant="outline" asChild>
             <Link to={`/trees/${organizationName}`}>{i18next.t("general:Groups")}</Link>
           </Button>
-          <XlsxImport
-            columns={Setting.getGroupColumns()}
-            templateName="import-group.xlsx"
-            uploadApi="upload-groups"
-            successMessage="Groups uploaded successfully, refreshing the page"
-            onUploaded={refresh}
-          />
+          {canCreateTopLevelGroup ? (
+            <XlsxImport
+              columns={Setting.getGroupColumns()}
+              templateName="import-group.xlsx"
+              uploadApi="upload-groups"
+              successMessage="Groups uploaded successfully, refreshing the page"
+              onUploaded={refresh}
+            />
+          ) : null}
         </>
       )}
       fetch={(q) =>
@@ -93,7 +96,7 @@ export default function GroupListPage() {
           q.sortOrder,
         )
       }
-      newRecord={account ? () => newGroup(account) : undefined}
+      newRecord={account && canCreateTopLevelGroup ? () => newGroup(account) : undefined}
       editUrl={(r) => `/groups/${r.owner}/${r.name}`}
       remove={(r) => GroupBackend.deleteGroup(r)}
       deleteDisabled={(r) =>
