@@ -19,6 +19,12 @@ variables:
   CASDOOR_IMAGE_NAME: casdoor
   IMAGE_TAG: latest
   IMAGE_TAG_COMMIT: $CI_COMMIT_SHORT_SHA
+  # Harbor Docker Hub proxy cache. The runner cannot reach registry-1.docker.io.
+  HARBOR_DOCKER_PROXY: test-harbor.vzoom.com/docker/library
+  NODE_IMAGE: $HARBOR_DOCKER_PROXY/node:20.20.1
+  GO_IMAGE: $HARBOR_DOCKER_PROXY/golang:1.25.8
+  ALPINE_IMAGE: $HARBOR_DOCKER_PROXY/alpine:latest
+  DEBIAN_IMAGE: $HARBOR_DOCKER_PROXY/debian:latest
 
 stages:
   - build
@@ -59,8 +65,13 @@ casdoor_build:
       docker build \
         --pull \
         --build-arg GOPROXY=https://goproxy.cn,direct \
+        --build-arg NODE_IMAGE="$NODE_IMAGE" \
+        --build-arg GO_IMAGE="$GO_IMAGE" \
+        --build-arg ALPINE_IMAGE="$ALPINE_IMAGE" \
+        --build-arg DEBIAN_IMAGE="$DEBIAN_IMAGE" \
         --cache-from "$CASDOOR_IMAGE:$IMAGE_TAG" \
         --file Dockerfile \
+        --target STANDARD \
         --tag "$CASDOOR_IMAGE:$IMAGE_TAG" \
         --tag "$CASDOOR_IMAGE:$IMAGE_TAG_COMMIT" \
         .
