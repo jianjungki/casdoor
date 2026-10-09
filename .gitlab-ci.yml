@@ -1,0 +1,73 @@
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH =~ /^(main|master|dev)$/'
+    - when: never
+
+variables:
+  GIT_DEPTH: "1"
+  DOCKER_BUILDKIT: "1"
+  BUILDKIT_PROGRESS: plain
+  # DinD daemon endpoint reachable from the job container.
+  DOCKER_HOST: tcp://docker:2375
+  # Disable TLS negotiation with the local DinD daemon (plain TCP).
+  DOCKER_TLS_CERTDIR: ""
+  # Harbor registry for vzoom images.
+  HARBOR_REGISTRY: test-harbor.vzoom.com
+  HARBOR_PROJECT: vzoom
+  CASDOOR_IMAGE_NAME: casdoor
+  IMAGE_TAG: latest
+  IMAGE_TAG_COMMIT: $CI_COMMIT_SHORT_SHA
+
+stages:
+  - build
+
+# Casdoor image: the repository Dockerfile builds the frontend and Go backend.
+# The resulting image is pushed to Harbor; Rancher is updated manually.
+casdoor_build:
+  stage: build
+  image: docker:27
+  services:
+    - name: docker:27-dind
+      alias: docker
+      command: ["--host=tcp://0.0.0.0:2375"]
+  tags:
+    - docker
+  interruptible: true
+  before_script:
+    - test -n "$HARBOR_USER" || (echo "HARBOR_USER is not configured" >&2; exit 1)
+    - test -n "$HARBOR_PASSWORD" || (echo "HARBOR_PASSWORD is not configured" >&2; exit 1)
+    # The internal Harbor host has no public DNS record, so resolve it here for
+    # docker login. The DinD daemon needs the same mapping from the runner's
+    # [runners.docker].extra_hosts configuration.
+    - sh -c 'grep -q "test-harbor.vzoom.com" /etc/hosts || echo "192.168.71.10 test-harbor.vzoom.com" >> /etc/hosts'
+    - sh -c 'grep -q "test.harbor.vzoom.com" /etc/hosts || echo "192.168.71.10 test.harbor.vzoom.com" >> /etc/hosts'
+    - docker version
+    - echo "$HARBOR_PASSWORD" | docker login "$HARBOR_REGISTRY" --username "$HARBOR_USER" --password-stdin
+  script:
+    - |
+      set -eu
+
+      test -f Dockerfile
+      test -f go.mod
+      test -f web/package.json
+
+      CASDOOR_IMAGE="$HARBOR_REGISTRY/$HARBOR_PROJECT/$CASDOOR_IMAGE_NAME"
+
+      docker pull "$CASDOOR_IMAGE:$IMAGE_TAG" || true
+      docker build \
+        --pull \
+        --build-arg GOPROXY=https://goproxy.cn,direct \
+        --cache-from "$CASDOOR_IMAGE:$IMAGE_TAG" \
+        --file Dockerfile \
+        --tag "$CASDOOR_IMAGE:$IMAGE_TAG" \
+        --tag "$CASDOOR_IMAGE:$IMAGE_TAG_COMMIT" \
+        .
+
+      docker push "$CASDOOR_IMAGE:$IMAGE_TAG"
+      docker push "$CASDOOR_IMAGE:$IMAGE_TAG_COMMIT"
+      echo "Paste this image into Rancher: $CASDOOR_IMAGE:$IMAGE_TAG_COMMIT"
+  rules:
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH =~ /^(main|master|dev)$/'
+    - when: never
