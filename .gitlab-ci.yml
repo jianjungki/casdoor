@@ -2,6 +2,7 @@ workflow:
   rules:
     - if: '$CI_COMMIT_TAG'
     - if: '$CI_COMMIT_BRANCH =~ /^(main|master|dev)$/'
+    - if: '$CI_COMMIT_BRANCH == "feat/add-admin-users"'
     - when: never
 
 variables:
@@ -70,4 +71,5 @@ casdoor_build:
   rules:
     - if: '$CI_COMMIT_TAG'
     - if: '$CI_COMMIT_BRANCH =~ /^(main|master|dev)$/'
+    - if: '$CI_COMMIT_BRANCH == "feat/add-admin-users"'
     - when: never
