@@ -38,8 +38,35 @@ func (c *ApiController) GetGroups() {
 	sortField := c.Ctx.Input.Query("sortField")
 	sortOrder := c.Ctx.Input.Query("sortOrder")
 	withTree := c.Ctx.Input.Query("withTree")
+	currentUser := c.requireOrganizationAccess(owner)
+	if currentUser == nil && !c.IsAdmin() {
+		return
+	}
+	isGroupAdminUser := !c.IsAdmin() && currentUser != nil && owner != "" && currentUser.Owner == owner
 
 	if limit == "" || page == "" {
+		if isGroupAdminUser {
+			groups, err := object.GetManagedGroupsByUser(owner, currentUser.Name)
+			if err != nil {
+				c.ResponseError(err.Error())
+				return
+			}
+
+			err = object.ExtendGroupsWithUsers(groups)
+			if err != nil {
+				c.ResponseError(err.Error())
+				return
+			}
+
+			if withTree == "true" {
+				c.ResponseOk(object.GetScopedTreeData(groups, owner))
+				return
+			}
+
+			c.ResponseOk(groups)
+			return
+		}
+
 		groups, err := object.GetGroups(owner)
 		if err != nil {
 			c.ResponseError(err.Error())
@@ -60,6 +87,34 @@ func (c *ApiController) GetGroups() {
 		c.ResponseOk(groups)
 	} else {
 		limit := util.ParseInt(limit)
+		if isGroupAdminUser {
+			groups, err := object.GetManagedGroupsByUser(owner, currentUser.Name)
+			if err != nil {
+				c.ResponseError(err.Error())
+				return
+			}
+			filteredGroups := object.FilterManagedGroups(groups, field, value, sortField, sortOrder, -1, -1)
+			paginator := pagination.NewPaginator(c.Ctx.Request, limit, int64(len(filteredGroups)))
+			start := paginator.Offset()
+			end := start + limit
+			if start > len(filteredGroups) {
+				filteredGroups = []*object.Group{}
+			} else {
+				if end > len(filteredGroups) {
+					end = len(filteredGroups)
+				}
+				filteredGroups = filteredGroups[start:end]
+			}
+			groups = filteredGroups
+			err = object.ExtendGroupsWithUsers(groups)
+			if err != nil {
+				c.ResponseError(err.Error())
+				return
+			}
+			c.ResponseOk(groups, paginator.Nums())
+			return
+		}
+
 		count, err := object.GetGroupCount(owner, field, value)
 		if err != nil {
 			c.ResponseError(err.Error())
@@ -113,6 +168,28 @@ func (c *ApiController) GetGroups() {
 // @router /get-group [get]
 func (c *ApiController) GetGroup() {
 	id := c.Ctx.Input.Query("id")
+	includeAdminUserDetails := c.Ctx.Input.Query("includeAdminUserDetails") == "true"
+	owner, name, err := util.GetOwnerAndNameFromIdWithError(id)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	currentUser := c.requireOrganizationAccess(owner)
+	if currentUser == nil && !c.IsAdmin() {
+		return
+	}
+	if !c.IsAdmin() {
+		allowed, err := object.CanUserManageGroup(owner, currentUser.Name, name)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+	}
 
 	group, err := object.GetGroup(id)
 	if err != nil {
@@ -123,6 +200,23 @@ func (c *ApiController) GetGroup() {
 	err = object.ExtendGroupWithUsers(group)
 	if err != nil {
 		c.ResponseError(err.Error())
+		return
+	}
+
+	if includeAdminUserDetails {
+		adminUserDetails, err := object.GetGroupAdminUserDetails(group)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+
+		c.ResponseOk(struct {
+			*object.Group
+			AdminUserDetails []*object.User `json:"adminUserDetails,omitempty"`
+		}{
+			Group:            group,
+			AdminUserDetails: adminUserDetails,
+		})
 		return
 	}
 
@@ -139,12 +233,48 @@ func (c *ApiController) GetGroup() {
 // @router /update-group [post]
 func (c *ApiController) UpdateGroup() {
 	id := c.Ctx.Input.Query("id")
-
-	var group object.Group
-	err := json.Unmarshal(c.Ctx.Input.RequestBody, &group)
+	owner, name, err := util.GetOwnerAndNameFromIdWithError(id)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
+	}
+
+	var group object.Group
+	err = json.Unmarshal(c.Ctx.Input.RequestBody, &group)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	if !c.IsAdmin() {
+		currentUser := c.requireOrganizationAccess(owner)
+		if currentUser == nil {
+			return
+		}
+		allowed, err := object.CanUserManageGroup(owner, currentUser.Name, name)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+
+		oldGroup, err := object.GetGroup(id)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if oldGroup == nil {
+			c.ResponseError(fmt.Sprintf(c.T("general:The group: %s doesn't exist"), id))
+			return
+		}
+		group.Owner = oldGroup.Owner
+		group.Name = oldGroup.Name
+		group.ParentId = oldGroup.ParentId
+		group.IsTopGroup = oldGroup.IsTopGroup
+		group.CreatedTime = oldGroup.CreatedTime
 	}
 
 	c.Data["json"] = wrapActionResponse(object.UpdateGroup(id, &group, c.IsGlobalAdmin(), c.GetAcceptLanguage()))
@@ -166,8 +296,29 @@ func (c *ApiController) AddGroup() {
 		return
 	}
 
-	if !c.requireOrganizationPermission(group.Owner) {
-		return
+	if c.IsAdmin() {
+		if !c.requireOrganizationPermission(group.Owner) {
+			return
+		}
+	} else {
+		currentUser := c.requireOrganizationAccess(group.Owner)
+		if currentUser == nil {
+			return
+		}
+		if group.ParentId == "" || group.ParentId == group.Owner {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+		allowed, err := object.CanUserManageGroup(group.Owner, currentUser.Name, group.ParentId)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+		group.IsTopGroup = false
 	}
 
 	c.Data["json"] = wrapActionResponse(object.AddGroup(&group))
@@ -189,6 +340,31 @@ func (c *ApiController) DeleteGroup() {
 		return
 	}
 
-	c.Data["json"] = wrapActionResponse(object.DeleteGroup(&group))
+	targetGroup, err := object.GetGroup(group.GetId())
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if targetGroup == nil {
+		c.ResponseError(fmt.Sprintf(c.T("general:The group: %s doesn't exist"), group.GetId()))
+		return
+	}
+	if !c.IsAdmin() {
+		currentUser := c.requireOrganizationAccess(targetGroup.Owner)
+		if currentUser == nil {
+			return
+		}
+		allowed, err := object.CanUserManageGroup(targetGroup.Owner, currentUser.Name, targetGroup.Name)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
+	}
+
+	c.Data["json"] = wrapActionResponse(object.DeleteGroup(targetGroup))
 	c.ServeJSON()
 }

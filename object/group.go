@@ -34,6 +34,7 @@ type Group struct {
 
 	DisplayName  string   `xorm:"varchar(100)" json:"displayName"`
 	Manager      string   `xorm:"varchar(100)" json:"manager"`
+	AdminUsers   []string `xorm:"mediumtext" json:"adminUsers"`
 	ContactEmail string   `xorm:"varchar(100)" json:"contactEmail"`
 	Type         string   `xorm:"varchar(100)" json:"type"`
 	ParentId     string   `xorm:"varchar(100)" json:"parentId"`
@@ -190,6 +191,11 @@ func UpdateGroup(id string, group *Group, isGlobalAdmin bool, lang string) (bool
 		return false, err
 	}
 
+	err = validateGroupAdminUsers(group)
+	if err != nil {
+		return false, err
+	}
+
 	if name != group.Name {
 		err := GroupChangeTrigger(owner, name, group.Name)
 		if err != nil {
@@ -207,6 +213,11 @@ func UpdateGroup(id string, group *Group, isGlobalAdmin bool, lang string) (bool
 
 func AddGroup(group *Group) (bool, error) {
 	err := checkGroupName(group.Name)
+	if err != nil {
+		return false, err
+	}
+
+	err = validateGroupAdminUsers(group)
 	if err != nil {
 		return false, err
 	}
@@ -244,6 +255,11 @@ func AddGroupsInBatch(groups []*Group) (bool, error) {
 
 	for _, group := range groups {
 		err = checkGroupName(group.Name)
+		if err != nil {
+			return false, err
+		}
+
+		err = validateGroupAdminUsers(group)
 		if err != nil {
 			return false, err
 		}
@@ -442,6 +458,49 @@ func ExtendGroupWithUsers(group *Group) error {
 
 	group.Users = userIds
 	return nil
+}
+
+func GetGroupAdminUserDetails(group *Group) ([]*User, error) {
+	if group == nil {
+		return nil, nil
+	}
+	if len(group.AdminUsers) == 0 {
+		return []*User{}, nil
+	}
+
+	// group.AdminUsers may hold "owner/name" ids (the frontend select submits
+	// them) while the user table's "name" column holds bare names, so normalize
+	// every entry to the bare name before querying.
+	names := make([]string, 0, len(group.AdminUsers))
+	for _, adminUser := range group.AdminUsers {
+		name := strings.TrimSpace(adminUser)
+		if strings.Contains(name, "/") {
+			_, name = util.GetOwnerAndNameFromIdNoCheck(name)
+		}
+		names = append(names, name)
+	}
+
+	users := []*User{}
+	err := ormer.Engine.Where("owner = ?", group.Owner).In("name", names).Find(&users)
+	if err != nil {
+		return nil, err
+	}
+
+	userMap := map[string]*User{}
+	for _, user := range users {
+		userMap[user.Name] = user
+	}
+
+	adminUsers := make([]*User, 0, len(names))
+	for _, username := range names {
+		user, ok := userMap[username]
+		if !ok {
+			continue
+		}
+		adminUsers = append(adminUsers, &User{Owner: user.Owner, Name: user.Name, DisplayName: user.DisplayName})
+	}
+
+	return adminUsers, nil
 }
 
 func ExtendGroupsWithUsers(groups []*Group) error {

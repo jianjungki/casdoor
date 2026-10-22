@@ -172,17 +172,30 @@ export function getNavGroups(account: Account | null | undefined): NavGroup[] {
 }
 
 /**
- * The organization can hide navbar entries: `navItems` for admins,
- * `userNavItems` for everyone else. Either being absent, not an array, or
- * containing "all" means "show everything" — the value Casdoor stores by default.
+ * The navbar is scoped per role. An organization can explicitly hide entries
+ * through `navItems` (admins) or `userNavItems` (everyone else). Either being
+ * absent, not an array, or containing "all" means "no organization override",
+ * in which case the account's role decides the default menu.
  */
 function getNavItemFilter(account: Account): string[] | null {
   const organization = account.organization;
-  const navItems = Setting.isLocalAdminUser(account) ? organization?.navItems : organization?.userNavItems ?? [];
-  if (!Array.isArray(navItems) || navItems.includes("all")) {
+  // Admins use navItems, everyone else userNavItems. An explicit, non-"all"
+  // configuration is the organization's choice and always wins over the roles.
+  const configured = Setting.isLocalAdminUser(account) ? organization?.navItems : organization?.userNavItems;
+  if (Array.isArray(configured) && !configured.includes("all")) {
+    return configured;
+  }
+
+  // No organization-level menu configuration → fall back to the account's role.
+  if (Setting.isLocalAdminUser(account)) {
+    // a console admin sees the whole console
     return null;
   }
-  return navItems;
+  if (Setting.isScopedAdmin(account)) {
+    return ["/", "/shortcuts", "/apps", "/groups", "/users"];
+  }
+  // a regular user only sees the consumer-facing Home group
+  return ["/", "/shortcuts", "/apps"];
 }
 
 function applyNavItems(groups: NavGroup[], account: Account): NavGroup[] {

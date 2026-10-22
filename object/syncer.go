@@ -251,7 +251,6 @@ func recordSyncerError(syncer *Syncer, err error) {
 		fmt.Printf("recordSyncerError() error: %s\n", err2.Error())
 	}
 }
-}
 
 func AddSyncer(syncer *Syncer) (bool, error) {
 	affected, err := ormer.Engine.Insert(syncer)

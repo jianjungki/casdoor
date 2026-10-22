@@ -58,6 +58,7 @@ export type EditField =
     options: (ctx: Ctx) => MultiSelectOption[];
     /** a predicate when only some records may invent their own values */
     creatable?: boolean | ((ctx: Ctx) => boolean);
+    placeholder?: string;
   })
   | (BaseField & {type: "code"; language?: string; height?: number})
   | (BaseField & {type: "custom"; render: (ctx: Ctx, update: (field: string, value: any) => void) => React.ReactNode});
@@ -296,6 +297,7 @@ export function SimpleEditPage({
           value={value ?? []}
           onChange={(v) => set(v)}
           options={field.options(ctx)}
+          placeholder={field.placeholder}
         />
       );
       break;

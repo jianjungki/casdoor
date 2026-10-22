@@ -74,6 +74,12 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
   // "/account" edits the signed-in user, every other route takes the name from the URL
   const organizationName = self ? account?.owner ?? "" : params.organizationName ?? "";
   const userName = self ? account?.name ?? "" : params.userName ?? "";
+  // The Organization dropdown decides which applications/groups this page offers.
+  // It is tracked separately from the URL param because in "add" mode the creator
+  // can change the organization after the record was created, and the option lists
+  // must follow that selection; otherwise a user in test_org would offer the apps
+  // and groups of built-in (the URL's default), which shows "no data".
+  const [owner, setOwner] = React.useState(organizationName);
   const [saving, setSaving] = React.useState(false);
   // the antd page keeps the open tab in the URL hash; "" is the unnamed tab
   const [activeTab, setActiveTab] = React.useState(() => window.location.hash.replace(/^#/, "") || DEFAULT_TAB);
@@ -89,9 +95,9 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
   const [transactions, setTransactions] = React.useState<any[]>([]);
 
   const organizations = useOrganizationOptions();
-  const applications = useApplicationOptions(organizationName);
-  const groups = useGroupOptions(organizationName);
-  const groupList = useGroupList(organizationName);
+  const applications = useApplicationOptions(owner);
+  const groups = useGroupOptions(owner);
+  const groupList = useGroupList(owner);
 
   const {record: user, updateField, updateFields, loading, denied, mode, setMode, reload} = useEditRecord<any>({
     fetch: () => UserBackend.getUser(organizationName, userName),
@@ -151,6 +157,8 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
 
   const isAdmin = Setting.isLocalAdminUser(account);
   const isSelf = account?.owner === user.owner && account?.name === user.name;
+  const isScopedAdminEditor = mode === "add" ? Setting.isScopedAdmin(account) : user.canManage === true;
+  const canEditBasic = isAdmin || isScopedAdminEditor || mode === "add";
 
   const save = async(exitAfterSave: boolean) => {
     const isAdd = mode === "add";
@@ -253,7 +261,10 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
         <SearchableSelect
           value={user.owner}
           disabled={!Setting.isAdminUser(account)}
-          onChange={(v) => updateField("owner", v)}
+          onChange={(v) => {
+            updateField("owner", v);
+            setOwner(v);
+          }}
           options={organizations}
         />
       </AccountItemRow>
@@ -265,7 +276,7 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
     ),
     "Name": (
       <AccountItemRow name="Name" labelKey="general:Name">
-        <Input value={user.name ?? ""} disabled={!isAdmin} onChange={(e) => updateField("name", e.target.value)} />
+        <Input value={user.name ?? ""} disabled={!canEditBasic} onChange={(e) => updateField("name", e.target.value)} />
       </AccountItemRow>
     ),
     "Display name": (
@@ -311,7 +322,7 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
     "Email": (
       <AccountItemRow name="Email" labelKey="general:Email">
         <div className="flex gap-2">
-          <Input type="email" value={user.email ?? ""} disabled={!isAdmin} onChange={(e) => updateField("email", e.target.value)} />
+          <Input type="email" value={user.email ?? ""} disabled={!canEditBasic} onChange={(e) => updateField("email", e.target.value)} />
           {/* the backend resolves the current user itself, so only the user can reset their own */}
           {isSelf ? (
             <ResetModal application={application} destType="email" buttonText={i18next.t("user:Reset Email...")} />
@@ -329,7 +340,7 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
               countryCodes={userOrganization.countryCodes}
             />
           </div>
-          <Input value={user.phone ?? ""} disabled={!isAdmin} onChange={(e) => updateField("phone", e.target.value)} />
+          <Input value={user.phone ?? ""} disabled={!canEditBasic} onChange={(e) => updateField("phone", e.target.value)} />
           {isSelf ? (
             <ResetModal
               application={application}
@@ -1145,7 +1156,7 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
   const extraRows = (
     <>
       <FormRow block labelKey="user:Is verified">
-        <Switch checked={!!user.isVerified} onCheckedChange={(v) => updateField("isVerified", v)} />
+        <Switch checked={!!user.isVerified} disabled={!isAdmin} onCheckedChange={(v) => updateField("isVerified", v)} />
       </FormRow>
       <FormRow block labelKey="user:Deleted time">
         <Input value={Setting.getFormattedDate(user.deletedTime) ?? ""} disabled />
@@ -1163,7 +1174,7 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
   // under which tab, exactly as getUniqueTabs()/getAccountItemsByTab() do in
   // web/src/UserEditPage.js.
   const visibleAccountItems = ((userOrganization?.accountItems ?? []) as any[]).filter((item) =>
-    isAccountItemVisible(item, {isAdmin, isSelfOrAdmin, user}),
+    isAccountItemVisible(item, {isAdmin, isManager: isScopedAdminEditor, isSelfOrAdmin, user}),
   );
   const tabNames = Array.from(new Set(visibleAccountItems.map((item: any) => item.tab || ""))).sort((a, b) => {
     // the unnamed tab always comes first
@@ -1207,6 +1218,7 @@ export default function UserEditPage({self}: {self?: boolean} = {}) {
       <AccountItemsProvider
         organization={userOrganization}
         isAdmin={isAdmin}
+        isManager={isScopedAdminEditor}
         isSelfOrAdmin={isSelfOrAdmin}
         user={user}
       >

@@ -1207,6 +1207,19 @@ export function isLocalAdminUser(account) {
   return account.isAdmin === true || isAdminUser(account);
 }
 
+/**
+ * A scoped / group admin manages one or more groups of an organization, but is
+ * not an organization admin. The account carries the managed group ids from
+ * get-account (object.GetManagedGroupIdsByUser). It can reach the group and user
+ * management pages for its own organization, but not the admin-only screens.
+ */
+export function isScopedAdmin(account) {
+  if (account === undefined || account === null) {
+    return false;
+  }
+  return Array.isArray(account.managedGroups) && account.managedGroups.length > 0;
+}
+
 export function deepCopy(obj) {
   return Object.assign({}, obj);
 }

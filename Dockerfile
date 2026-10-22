@@ -1,4 +1,9 @@
-FROM node:20.20.1 AS FRONT
+ARG NODE_IMAGE=node:20.20.1
+ARG GO_IMAGE=golang:1.25.8
+ARG ALPINE_IMAGE=alpine:latest
+ARG DEBIAN_IMAGE=debian:latest
+
+FROM ${NODE_IMAGE} AS FRONT
 WORKDIR /web
 
 # Copy only dependency files first for better caching
@@ -9,7 +14,7 @@ RUN yarn install --frozen-lockfile --network-timeout 1000000
 COPY ./web .
 RUN NODE_OPTIONS="--max-old-space-size=4096" yarn run build
 
-FROM golang:1.25.8 AS BACK
+FROM ${GO_IMAGE} AS BACK
 # GOPROXY to avoid timeouts when fetching Go packages during the build.
 # It can be overridden at build time with:
 #   docker build --build-arg GOPROXY=https://proxy.golang.org,direct ...
@@ -27,7 +32,7 @@ COPY . .
 RUN go test -v -run TestGetVersionInfo ./util/system_test.go ./util/system.go ./util/variable.go
 RUN ./build.sh
 
-FROM alpine:latest AS STANDARD
+FROM ${ALPINE_IMAGE} AS STANDARD
 LABEL MAINTAINER="https://casdoor.org/"
 ARG USER=casdoor
 ARG TARGETOS
@@ -56,7 +61,7 @@ COPY --from=FRONT --chown=$USER:$USER /web/build ./web/build
 ENTRYPOINT ["/server"]
 
 
-FROM debian:latest AS ALLINONE
+FROM ${DEBIAN_IMAGE} AS ALLINONE
 LABEL MAINTAINER="https://casdoor.org/"
 ARG TARGETOS
 ARG TARGETARCH

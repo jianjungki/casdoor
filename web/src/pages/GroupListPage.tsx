@@ -3,7 +3,7 @@ import {Link} from "react-router-dom";
 import {Button} from "@/components/ui/button";
 import {CrudListPage} from "@/components/crud/CrudListPage";
 import {XlsxImport} from "@/components/crud/XlsxImport";
-import {dateColumn, linkColumn, organizationColumn, textColumn} from "@/components/crud/columns";
+import {dateColumn, linkColumn, organizationColumn, refsColumn, textColumn} from "@/components/crud/columns";
 import type {ColumnDef} from "@/components/crud/types";
 import {useAccount} from "@/hooks/use-account";
 import {useOrganizationFilter, useRequestOrganization} from "@/hooks/use-organization";
@@ -15,6 +15,7 @@ export default function GroupListPage() {
   const {account} = useAccount();
   const organizationName = useRequestOrganization();
   const organizationFilter = useOrganizationFilter();
+  const canCreateTopLevelGroup = Setting.isLocalAdminUser(account);
 
   const columns: ColumnDef<any>[] = [
     linkColumn({dataIndex: "name", to: (r) => `/groups/${r.owner}/${r.name}`}),
@@ -59,6 +60,7 @@ export default function GroupListPage() {
         </Button>
       ),
     },
+    refsColumn({dataIndex: "adminUsers", title: i18next.t("group:Group admin users"), urlPrefix: "/users", width: 150, sortable: true, searchable: true}),
   ];
 
   return (
@@ -71,13 +73,15 @@ export default function GroupListPage() {
           <Button variant="outline" asChild>
             <Link to={`/trees/${organizationName}`}>{i18next.t("general:Groups")}</Link>
           </Button>
-          <XlsxImport
-            columns={Setting.getGroupColumns()}
-            templateName="import-group.xlsx"
-            uploadApi="upload-groups"
-            successMessage="Groups uploaded successfully, refreshing the page"
-            onUploaded={refresh}
-          />
+          {canCreateTopLevelGroup ? (
+            <XlsxImport
+              columns={Setting.getGroupColumns()}
+              templateName="import-group.xlsx"
+              uploadApi="upload-groups"
+              successMessage="Groups uploaded successfully, refreshing the page"
+              onUploaded={refresh}
+            />
+          ) : null}
         </>
       )}
       fetch={(q) =>
@@ -92,7 +96,7 @@ export default function GroupListPage() {
           q.sortOrder,
         )
       }
-      newRecord={account ? () => newGroup(account) : undefined}
+      newRecord={account && canCreateTopLevelGroup ? () => newGroup(account) : undefined}
       editUrl={(r) => `/groups/${r.owner}/${r.name}`}
       remove={(r) => GroupBackend.deleteGroup(r)}
       deleteDisabled={(r) =>

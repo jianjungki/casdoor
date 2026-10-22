@@ -18,12 +18,43 @@ export interface AccountItem {
 
 export interface AccountItemRules {
   isAdmin: boolean;
+  isManager?: boolean;
   isSelfOrAdmin: boolean;
   user: any;
 }
 
 /** The rows whose editing is frozen once the user's identity has been verified. */
 const ID_VERIFICATION_ITEMS = new Set(["ID card info", "ID card", "ID card type", "Real name"]);
+const GROUP_MANAGER_EDITABLE_ITEMS = new Set([
+  "Name",
+  "Display name",
+  "First name",
+  "Last name",
+  "Avatar",
+  "User type",
+  "Password",
+  "Email",
+  "Phone",
+  "Country/Region",
+  "Location",
+  "Address",
+  "Addresses",
+  "Affiliation",
+  "Title",
+  "Homepage",
+  "Bio",
+  "Tag",
+  "Language",
+  "Gender",
+  "Birthday",
+  "Education",
+  "Properties",
+  "Groups",
+]);
+
+export function canGroupManagerEditAccountItem(name: string): boolean {
+  return GROUP_MANAGER_EDITABLE_ITEMS.has(name);
+}
 
 export function getAccountItemMap(organization: any): Record<string, AccountItem> {
   const items: AccountItem[] = organization?.accountItems ?? [];
@@ -41,10 +72,10 @@ export function isAccountItemVisible(item: AccountItem | undefined, rules: Accou
     return false;
   }
   if (item.viewRule === "Self") {
-    return rules.isSelfOrAdmin;
+    return rules.isSelfOrAdmin || Boolean(rules.isManager && canGroupManagerEditAccountItem(item.name));
   }
   if (item.viewRule === "Admin") {
-    return rules.isAdmin;
+    return rules.isAdmin || Boolean(rules.isManager && canGroupManagerEditAccountItem(item.name));
   }
   return true;
 }
@@ -55,10 +86,12 @@ export function isAccountItemDisabled(item: AccountItem | undefined, rules: Acco
   }
 
   let disabled = false;
-  if (item.modifyRule === "Self") {
+  if (rules.isManager && canGroupManagerEditAccountItem(item.name)) {
+    disabled = false;
+  } else if (item.modifyRule === "Self") {
     disabled = !rules.isSelfOrAdmin;
   } else if (item.modifyRule === "Admin") {
-    disabled = !rules.isAdmin;
+    disabled = !rules.isAdmin && !(rules.isManager && canGroupManagerEditAccountItem(item.name));
   } else if (item.modifyRule === "Immutable") {
     disabled = true;
   }

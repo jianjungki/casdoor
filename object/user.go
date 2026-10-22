@@ -236,9 +236,11 @@ type User struct {
 
 	ThirdPartyLinks []*ThirdPartyLink `xorm:"-" json:"thirdPartyLinks,omitempty"`
 
-	Roles       []*Role       `json:"roles"`
-	Permissions []*Permission `json:"permissions"`
-	Groups      []string      `xorm:"mediumtext" json:"groups"`
+	Roles         []*Role       `json:"roles"`
+	Permissions   []*Permission `json:"permissions"`
+	Groups        []string      `xorm:"mediumtext" json:"groups"`
+	ManagedGroups []string      `xorm:"-" json:"managedGroups,omitempty"`
+	CanManage     bool          `xorm:"-" json:"canManage,omitempty"`
 
 	LastChangePasswordTime string `xorm:"varchar(100)" json:"lastChangePasswordTime"`
 	LastSigninWrongTime    string `xorm:"varchar(100)" json:"lastSigninWrongTime"`
@@ -1519,7 +1521,7 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 	}
 
 	var roles []*Role
-	err = ormer.Engine.Find(&roles)
+	err = ormer.Engine.Where("owner=?", owner).Find(&roles)
 	if err != nil {
 		return err
 	}
@@ -1547,7 +1549,7 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 	}
 
 	var permissions []*Permission
-	err = ormer.Engine.Find(&permissions)
+	err = ormer.Engine.Where("owner=?", owner).Find(&permissions)
 	if err != nil {
 		return err
 	}
@@ -1582,6 +1584,11 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 		return err
 	}
 
+	err = syncGroupAdminUsersOnUserRename(session, owner, oldName, newName)
+	if err != nil {
+		return err
+	}
+
 	_, err = session.Where("owner = ? AND user_name = ?", owner, oldName).Cols("user_name").Update(&ThirdPartyLink{UserName: newName})
 	if err != nil {
 		return err
@@ -1598,6 +1605,35 @@ func userChangeTrigger(owner string, oldName string, newName string) error {
 	}
 
 	return session.Commit()
+}
+
+func syncGroupAdminUsersOnUserRename(session *xorm.Session, owner string, oldName string, newName string) error {
+	var groups []*Group
+	err := ormer.Engine.Where("owner = ?", owner).Find(&groups)
+	if err != nil {
+		return err
+	}
+
+	for _, group := range groups {
+		updated := false
+		for i, adminUser := range group.AdminUsers {
+			if adminUser == oldName {
+				group.AdminUsers[i] = newName
+				updated = true
+			}
+		}
+		if !updated {
+			continue
+		}
+
+		group.AdminUsers = normalizeGroupAdminUsers(group.AdminUsers)
+		_, err = session.Where("name=?", group.Name).And("owner=?", group.Owner).Update(group)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (user *User) IsMfaEnabled() bool {

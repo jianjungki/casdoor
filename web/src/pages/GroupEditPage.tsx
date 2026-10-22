@@ -5,15 +5,23 @@ import {MapTable} from "@/components/crud/MapTable";
 import {Badge} from "@/components/ui/badge";
 import {SimpleEditPage, type EditField} from "@/components/crud/SimpleEditPage";
 import {useAccount} from "@/hooks/use-account";
-import {useGroupOptions, useOrganizationOptions} from "@/hooks/use-options";
+import {useGroupOptions, useOrganizationOptions, useUserOptions} from "@/hooks/use-options";
 import * as GroupBackend from "@/backend/GroupBackend";
 import * as Setting from "@/lib/setting";
 
 export default function GroupEditPage() {
   const {organizationName = "", groupName = ""} = useParams();
   const {account} = useAccount();
+  const isGroupManager = Setting.isScopedAdmin(account) && !Setting.isLocalAdminUser(account);
   const organizations = useOrganizationOptions();
-  const groups = useGroupOptions(organizationName);
+  // The Organization dropdown decides which users and groups this page offers.
+  // It is tracked separately from the URL param because in "add" mode the user
+  // can change the organization after the record was created, and the
+  // admin-users and parent-group pickers (not just the URL) must follow that
+  // selection; otherwise a group in one org would offer the users of another.
+  const [owner, setOwner] = React.useState(organizationName);
+  const groups = useGroupOptions(owner);
+  const userList = useUserOptions(owner);
   const location = useLocation();
   // the group tree hands over where to return to; kept in a ref because "Save"
   // re-navigates to the saved name and drops the router state
@@ -26,8 +34,13 @@ export default function GroupEditPage() {
       labelKey: "general:Organization",
       options: () => organizations,
       disabled: () => !Setting.isAdminUser(account),
+      // keep the pickers in sync with the organization selected in the form
+      onChange: (value, _ctx, updateFields) => {
+        updateFields({owner: value});
+        setOwner(value);
+      },
     },
-    {type: "text", name: "name", labelKey: "general:Name", required: true},
+    {type: "text", name: "name", labelKey: "general:Name", required: true, disabled: () => isGroupManager},
     {type: "text", name: "displayName", labelKey: "general:Display name"},
     {
       type: "select",
@@ -42,6 +55,7 @@ export default function GroupEditPage() {
       type: "select",
       name: "parentId",
       labelKey: "group:Parent group",
+      disabled: () => isGroupManager,
       options: (ctx) => [
         {value: ctx.record.owner, label: ctx.record.owner},
         ...groups
@@ -69,6 +83,14 @@ export default function GroupEditPage() {
           </div>
         );
       },
+    },
+    {
+      type: "multiselect",
+      name: "adminUsers",
+      labelKey: "group:Group admin users",
+      options: () => userList,
+      creatable: true,
+      placeholder: i18next.t("group:Select admin users for this group"),
     },
     {type: "text", name: "contactEmail", labelKey: "general:Email"},
     {type: "number", name: "gidNumber", labelKey: "general:GID number"},

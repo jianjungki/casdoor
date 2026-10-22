@@ -202,6 +202,17 @@ func IsAllowed(subOwner string, subName string, method string, urlPath string, o
 		if user.IsAdmin && subOwner == objOwner {
 			return true, nil
 		}
+		// Regular users are allowed to view the data dashboard (statistics) of
+		// their own organization only. This lets ordinary (non-admin, non-group-admin)
+		// users land on the dashboard instead of the consumer app list. Objects are
+		// those in viewerDashboardApis, and we require the requested owner to be the
+		// user's own organization so no cross-org data leaks.
+		if isDashboardApi(urlPath) && user.Owner == objOwner {
+			return true, nil
+		}
+		if isGroupAdminApi(urlPath) {
+			return isGroupAdmin(user, objOwner), nil
+		}
 	}
 
 	res, err := Enforcer.Enforce(subOwner, subName, method, urlPath, objOwner, objName)
@@ -217,6 +228,57 @@ func IsAllowed(subOwner string, subName string, method string, urlPath string, o
 	}
 
 	return res, nil
+}
+
+func isGroupAdmin(user *object.User, objOwner string) bool {
+	if objOwner == "" || user.Owner != objOwner {
+		return false
+	}
+
+	hasManagedGroups, err := object.HasManagedGroupsByUser(objOwner, user.Name)
+	if err != nil {
+		panic(err)
+	}
+
+	return hasManagedGroups
+}
+
+var groupAdminAllowedApis = map[string]bool{
+	"/api/get-group":               true,
+	"/api/get-groups":              true,
+	"/api/add-group":               true,
+	"/api/update-group":            true,
+	"/api/delete-group":            true,
+	"/api/get-users":               true,
+	"/api/get-user-count":          true,
+	"/api/get-form":                true,
+	"/api/add-user":                true,
+	"/api/update-user":             true,
+	"/api/delete-user":             true,
+	"/api/remove-user-from-group":  true,
+	"/api/get-dashboard":           true,
+	"/api/get-dashboard-mfa":       true,
+	"/api/get-dashboard-heatmap":   true,
+	"/api/get-dashboard-providers": true,
+}
+
+func isGroupAdminApi(urlPath string) bool {
+	return groupAdminAllowedApis[urlPath]
+}
+
+// viewerDashboardApis are the read-only dashboard endpoints that regular users
+// may call (for their own organization only). These differ from the group-admin
+// APIs in that they only reveal aggregated statistics and require no management
+// privilege beyond ownership of the organization.
+var viewerDashboardApis = map[string]bool{
+	"/api/get-dashboard":           true,
+	"/api/get-dashboard-mfa":       true,
+	"/api/get-dashboard-heatmap":   true,
+	"/api/get-dashboard-providers": true,
+}
+
+func isDashboardApi(urlPath string) bool {
+	return viewerDashboardApis[urlPath]
 }
 
 func isAllowedInDemoMode(subOwner string, subName string, method string, urlPath string, objOwner string, objName string) bool {
