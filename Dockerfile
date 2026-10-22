@@ -39,11 +39,34 @@ ARG TARGETOS
 ARG TARGETARCH
 ENV BUILDX_ARCH="${TARGETOS:-linux}_${TARGETARCH:-amd64}"
 
-RUN sed -i 's/https/http/' /etc/apk/repositories
-RUN apk add --update sudo
-RUN apk add tzdata
-RUN apk add curl
-RUN apk add ca-certificates && update-ca-certificates
+# Install all system packages in a single layer. Like build.sh's Google check,
+# probe the default Alpine CDN first; when it is unreachable (blocked or flaky
+# in restricted networks, causing "Socket not connected" / apk exit code 6),
+# fall back to the Aliyun mirror. apk is retried on transient network errors,
+# and after 3 failures over HTTPS the mirror is downgraded to HTTP (which was
+# previously done unconditionally via "sed -i 's/https/http/'").
+RUN set -eux; \
+    if ! timeout 10 wget -q -O /dev/null https://dl-cdn.alpinelinux.org/alpine/; then \
+        echo "Alpine CDN is unreachable, apk mirror is switched to Aliyun: https://mirrors.aliyun.com"; \
+        sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories; \
+    fi; \
+    for i in 1 2 3 4 5 6; do \
+        if apk add --no-cache sudo tzdata curl ca-certificates && update-ca-certificates; then \
+            break; \
+        fi; \
+        if [ "$i" = 3 ]; then \
+            if grep -q 'dl-cdn.alpinelinux.org' /etc/apk/repositories; then \
+                echo "apk keeps failing with the Alpine CDN, switching to Aliyun: https://mirrors.aliyun.com"; \
+                sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories; \
+            elif grep -q 'https://' /etc/apk/repositories; then \
+                echo "apk over HTTPS keeps failing, downgrading to HTTP"; \
+                sed -i 's#https://#http://#g' /etc/apk/repositories; \
+            fi; \
+        fi; \
+        if [ "$i" -ge 6 ]; then echo "apk add failed after 6 attempts" >&2; exit 1; fi; \
+        echo "apk add attempt $i failed, retrying in 5 seconds..."; \
+        sleep 5; \
+    done
 
 RUN adduser -D $USER -u 1000 \
     && echo "$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$USER \
