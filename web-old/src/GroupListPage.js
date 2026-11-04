@@ -271,8 +271,10 @@ class GroupListPage extends BaseListPage {
               {record.parentId}
             </Link>;
           }
+          // parentName is filled by GetGroups API from the parent's displayName; fall back to
+          // parentId (dept_id) when the parent row is missing from the current page batch.
           return <Link to={`/groups/${record.owner}/${record.parentId}`}>
-            {record?.parentName}
+            {record?.parentName || record.parentId}
           </Link>;
         },
       },
