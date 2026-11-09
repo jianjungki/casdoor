@@ -113,7 +113,7 @@ func (c *ApiController) GetSite() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /update-site [post]
 func (c *ApiController) UpdateSite() {
-	if !c.requireGlobalAdmin() {
+	if !c.RequireGlobalAdmin() {
 		return
 	}
 
@@ -138,7 +138,7 @@ func (c *ApiController) UpdateSite() {
 // @Success 200 {object} controllers.Response The Response object
 // @router /add-site [post]
 func (c *ApiController) AddSite() {
-	if !c.requireGlobalAdmin() {
+	if !c.RequireGlobalAdmin() {
 		return
 	}
 
