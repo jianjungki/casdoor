@@ -34,6 +34,82 @@ type DatabaseSyncerProvider struct {
 	Syncer *Syncer
 }
 
+func (syncer *Syncer) isSshTunneled() bool {
+	return syncer.SshType != "" && (syncer.DatabaseType == "mysql" || syncer.DatabaseType == "postgres" || syncer.DatabaseType == "mssql")
+}
+
+func (syncer *Syncer) isDatabaseSyncer() bool {
+	switch GetSyncerProvider(syncer).(type) {
+	case *DatabaseSyncerProvider, *KeycloakSyncerProvider:
+		return true
+	}
+	return false
+}
+
+func CheckSyncerDatabaseHost(syncer *Syncer) error {
+	if !syncer.isDatabaseSyncer() || syncer.DatabaseType == "sqlite3" || syncer.DatabaseType == "sqlite" {
+		return nil
+	}
+	if syncer.isSshTunneled() {
+		return util.CheckInternetHost(syncer.SshHost)
+	}
+	return util.CheckInternetHost(syncer.Host)
+}
+
+func CheckSyncerDatabaseTarget(syncer *Syncer) error {
+	if !syncer.isDatabaseSyncer() {
+		return nil
+	}
+
+	for name, table := range map[string]string{"table": syncer.Table, "affiliation table": syncer.AffiliationTable} {
+		if table != "" && !isValidSyncerTable(table) {
+			return fmt.Errorf("the %s: %s of the syncer is not a valid table name", name, table)
+		}
+	}
+
+	if syncer.DatabaseType == "sqlite3" || syncer.DatabaseType == "sqlite" {
+		return nil
+	}
+	ownHost, ownPort, ok := getOwnDbAddress()
+	if !ok {
+		return nil
+	}
+	host := syncer.Host
+	if syncer.isSshTunneled() {
+		if !isSameDbServer(syncer.SshHost, 0, "localhost", 0) {
+			return nil
+		}
+	}
+	if !isCloudIntranet {
+		host = strings.ReplaceAll(host, "dbi.", "db.")
+		ownHost = strings.ReplaceAll(ownHost, "dbi.", "db.")
+	}
+	if isSameDbServer(host, syncer.Port, ownHost, ownPort) {
+		return fmt.Errorf("the host: %s:%d of the syncer is Casdoor's own database server, which cannot be synced", syncer.Host, syncer.Port)
+	}
+	return nil
+}
+
+func isValidSyncerTable(table string) bool {
+	parts := strings.Split(table, ".")
+	if len(parts) > 2 {
+		return false
+	}
+	for _, part := range parts {
+		if !util.FilterSQLIdentifier(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func checkTenantSyncerHost(syncer *Syncer) error {
+	if syncer.Organization == "built-in" {
+		return nil
+	}
+	return CheckSyncerDatabaseHost(syncer)
+}
+
 // InitAdapter initializes the database adapter
 func (p *DatabaseSyncerProvider) InitAdapter() error {
 	if p.Syncer.Ormer != nil {
@@ -41,6 +117,16 @@ func (p *DatabaseSyncerProvider) InitAdapter() error {
 	}
 
 	err := checkDataSourceFields(map[string]string{"host": p.Syncer.Host, "user": p.Syncer.User, "database": p.Syncer.Database, "SSL mode": p.Syncer.SslMode})
+	if err != nil {
+		return err
+	}
+
+	err = CheckSyncerDatabaseTarget(p.Syncer)
+	if err != nil {
+		return err
+	}
+
+	err = checkTenantSyncerHost(p.Syncer)
 	if err != nil {
 		return err
 	}

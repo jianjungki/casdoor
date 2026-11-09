@@ -220,6 +220,12 @@ func (c *ApiController) TestSyncerDb() {
 }
 
 func (c *ApiController) checkSyncerDatabaseType(syncer *object.Syncer) bool {
+	err := object.CheckSyncerDatabaseTarget(syncer)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return false
+	}
+
 	if c.IsGlobalAdmin() || (syncer.DatabaseType != "sqlite3" && syncer.DatabaseType != "sqlite") {
 		return true
 	}
