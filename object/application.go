@@ -358,7 +358,7 @@ func GetApplicationByUserId(userId string) (application *Application, err error)
 		return nil, err
 	}
 	if IsAppUser(userId) {
-		application, err = getApplication("admin", name)
+		application, err = getAppUserApplication(name)
 		return
 	}
 
@@ -437,6 +437,8 @@ func UpdateApplication(id string, application *Application, isGlobalAdmin bool, 
 		KeepApplicationCustomHtml(application, oldApplication)
 	}
 
+	application.Owner = owner
+
 	if name == "app-built-in" {
 		application.Name = name
 	}
@@ -493,9 +495,7 @@ func UpdateApplication(id string, application *Application, isGlobalAdmin bool, 
 }
 
 func AddApplication(application *Application) (bool, error) {
-	if application.Owner == "" {
-		application.Owner = "admin"
-	}
+	application.Owner = "admin"
 	if application.Organization == "" {
 		application.Organization = "built-in"
 	}
