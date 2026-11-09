@@ -270,7 +270,7 @@ func (p *LarkSyncerProvider) postJSON(url string, data interface{}) ([]byte, err
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := newSyncerHttpClient()
+	client := p.Syncer.getHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -298,7 +298,7 @@ func (p *LarkSyncerProvider) getWithAuth(url string, accessToken string) ([]byte
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := newSyncerHttpClient()
+	client := p.Syncer.getHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

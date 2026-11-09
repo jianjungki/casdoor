@@ -949,6 +949,20 @@ func checkUserGroups(oldUser, user *User, lang string) string {
 	return ""
 }
 
+func getOrganizationGroups(owner string, groups []string) []string {
+	if len(groups) == 0 {
+		return groups
+	}
+
+	res := []string{}
+	for _, group := range groups {
+		if strings.HasPrefix(group, owner+"/") {
+			res = append(res, group)
+		}
+	}
+	return res
+}
+
 func CheckToEnableCaptcha(application *Application, organization, username string, clientIp string) (bool, error) {
 	if len(application.Providers) == 0 {
 		return false, nil

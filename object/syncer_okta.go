@@ -153,7 +153,7 @@ func (p *OktaSyncerProvider) getOktaUsers(nextLink string) ([]*OktaUser, string,
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	client := newSyncerHttpClient()
+	client := p.Syncer.getHttpClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, "", err
