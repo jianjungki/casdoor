@@ -59,7 +59,7 @@ func GetOAuthToken(grantType string, clientId string, clientSecret string, code 
 		}, nil
 	}
 
-	// Handle WeChat Mini Program flow separately â€” it does not use standard OAuth grant types
+	// Handle WeChat Mini Program flow separately â€?it does not use standard OAuth grant types
 	if tag == "wechat_miniprogram" {
 		token, tokenError, err := GetWechatMiniProgramToken(application, code, host, username, avatar, lang)
 		if err != nil {
@@ -252,6 +252,21 @@ func GetAuthorizationCodeToken(application *Application, clientSecret string, co
 			Error:            InvalidGrant,
 			ErrorDescription: fmt.Sprintf("authorization code has expired, nowUnix: [%s], token.CodeExpireIn: [%s]", time.Unix(nowUnix, 0).Format(time.RFC3339), time.Unix(token.CodeExpireIn, 0).Format(time.RFC3339)),
 		}, nil
+	}
+
+	claimed, err := claimAuthorizationCode(token.Code)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !claimed {
+		return nil, &TokenError{
+			Error:            InvalidGrant,
+			ErrorDescription: fmt.Sprintf("authorization code has been used for token: [%s]", token.GetId()),
+		}, nil
+	}
+
+	if clientSecret != "" {
+		token.GrantType = "authorization_code"
 	}
 	return token, nil, nil
 }

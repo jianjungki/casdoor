@@ -1042,7 +1042,6 @@ func (c *ApiController) Login() {
 					c.ResponseError(err.Error())
 					return
 				}
-				isBoundUser := user != nil
 
 				if user == nil {
 					if !application.EnableSignUp {
@@ -1211,8 +1210,7 @@ func (c *ApiController) Login() {
 					return
 				}
 
-				// binding to an existing account is a sign-in to it, so its MFA applies
-				if isBoundUser && checkMfaEnable(c, user, organization, verificationType) {
+				if checkMfaEnable(c, user, organization, verificationType) {
 					return
 				}
 
