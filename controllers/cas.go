@@ -20,8 +20,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/casdoor/casdoor/object"
+	"github.com/casdoor/casdoor/util"
 )
 
 const (
@@ -161,8 +163,17 @@ func (c *RootController) CasP3ProxyValidate() {
 	}
 }
 
+// getCasPgtCallbackClient keeps the CAS proxy callback from reaching intranet hosts
+func getCasPgtCallbackClient() *http.Client {
+	return util.NewInternetOnlyHttpClient(10 * time.Second)
+}
+
 func sendCasPgtCallback(request *http.Request) error {
-	resp, err := http.DefaultClient.Do(request)
+	client := getCasPgtCallbackClient()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := client.Do(request)
 	if err != nil {
 		return err
 	}
@@ -212,6 +223,13 @@ func (c *RootController) CasProxy() {
 	}
 }
 
+func (c *RootController) isCasProxyTargetAllowed(applicationId string, targetService string) bool {
+	application, err := object.GetApplication(applicationId)
+	if err != nil || application == nil {
+		return false
+	}
+	return object.CheckCasLogin(application, c.GetAcceptLanguage(), targetService) == nil
+}
 func (c *RootController) SamlValidate() {
 	c.Ctx.Output.Header("Content-Type", "text/xml; charset=utf-8")
 	target := c.Ctx.Input.Query("TARGET")
