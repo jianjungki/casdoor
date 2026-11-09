@@ -32,11 +32,17 @@ const (
 )
 
 func setCorsHeaders(ctx *context.Context, origin string) {
+	setCorsHeadersWithCredentials(ctx, origin, true)
+}
+
+func setCorsHeadersWithCredentials(ctx *context.Context, origin string, allowCredentials bool) {
 	if origin != "" {
 		ctx.Output.Header(headerAllowOrigin, origin)
 		ctx.Output.Header(headerAllowMethods, "POST, GET, OPTIONS, DELETE")
 		ctx.Output.Header(headerAllowHeaders, "Content-Type, Authorization")
-		ctx.Output.Header(headerAllowCredentials, "true")
+		if allowCredentials {
+			ctx.Output.Header(headerAllowCredentials, "true")
+		}
 	}
 
 	if ctx.Input.Method() == "OPTIONS" {
@@ -81,7 +87,7 @@ func CorsFilter(ctx *context.Context) {
 	}
 
 	if ctx.Request.RequestURI == "/api/userinfo" {
-		setCorsHeaders(ctx, origin)
+		setCorsHeadersWithCredentials(ctx, origin, origin == originConf || originHostname == host)
 		return
 	}
 
@@ -90,7 +96,7 @@ func CorsFilter(ctx *context.Context) {
 			setCorsHeaders(ctx, origin)
 		} else if originHostname == host {
 			setCorsHeaders(ctx, origin)
-		} else if util.IsHostIntranet(host) {
+		} else if util.IsHostIntranet(host) && util.IsHostIntranet(originHostname) {
 			setCorsHeaders(ctx, origin)
 		} else {
 			ok, err := object.IsOriginAllowed(origin)
