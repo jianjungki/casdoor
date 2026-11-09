@@ -643,7 +643,7 @@ func getExistUserByBindingRule(providerItem *object.ProviderItem, application *o
 			if err != nil {
 				return nil, err
 			}
-			if user != nil {
+			if user != nil && isEmailBindable(user) {
 				return user, nil
 			}
 		}
@@ -674,7 +674,11 @@ func getExistUserByBindingRule(providerItem *object.ProviderItem, application *o
 		}
 	}
 
-	return user, nil
+	return nil, nil
+}
+
+func isEmailBindable(user *object.User) bool {
+	return user.EmailVerified || user.RegisterType != "Application Signup"
 }
 
 func getUserByProvider(organization string, provider *object.Provider, providerId string) (*object.User, error) {
