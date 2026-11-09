@@ -133,7 +133,10 @@ var secretFields = []string{
 }
 
 func FilterField(field string) bool {
-	return ReFieldWhiteList.MatchString(field)
+	if !ReFieldWhiteList.MatchString(field) {
+		return false
+	}
+	return !InSlice(secretFields, strings.ToLower(field))
 }
 
 // FilterSQLIdentifier validates that field is a safe SQL column identifier.
