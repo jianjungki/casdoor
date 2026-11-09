@@ -641,6 +641,28 @@ func IsUserOfApplication(user *User, application *Application) (bool, error) {
 	return organization != nil && organization.DefaultApplication == application.Name && application.Organization == "built-in", nil
 }
 
+func CheckPasswordOnlySignin(user *User, clientIp string, lang string) error {
+	organization, err := GetOrganizationByUser(user)
+	if err != nil {
+		return err
+	}
+	if organization != nil && organization.DisableSignin {
+		return fmt.Errorf(i18n.Translate(lang, "auth:The organization: %s has disabled users to signin"), organization.Name)
+	}
+
+	if clientIp != "" {
+		err = CheckEntryIp(clientIp, user, nil, organization, lang)
+		if err != nil {
+			return err
+		}
+	}
+
+	if user.NeedUpdatePassword || IsNeedPromptMfa(organization, user) {
+		return fmt.Errorf("the user: %s must update the password or set up MFA on the login page first", user.GetId())
+	}
+	return nil
+}
+
 // CheckApplicationSignin answers whether this user may sign in to this application.
 // Upstream's cross-organization sign-in check and CIMD tag filter are not ported yet.
 func CheckApplicationSignin(application *Application, user *User, clientIp string, lang string) error {
