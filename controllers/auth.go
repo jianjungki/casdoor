@@ -254,7 +254,10 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 		}
 
 		deviceAuthCacheDeviceCodeCast := deviceAuthCacheDeviceCode.(object.DeviceAuthCache)
-		deviceAuthCacheDeviceCodeCast.UserName = user.Name
+		if !c.checkUserOfApplicationId(user, deviceAuthCacheDeviceCodeCast.ApplicationId) {
+			return
+		}
+		deviceAuthCacheDeviceCodeCast.UserName = user.GetId()
 		deviceAuthCacheDeviceCodeCast.UserSignIn = true
 		deviceAuthCacheDeviceCodeCast.Status = object.DeviceAuthStatusApproved
 
@@ -521,6 +524,31 @@ func (c *ApiController) promptMfaSetupAfterMfa(user *object.User) bool {
 	return true
 }
 
+func (c *ApiController) checkUserOfApplication(user *object.User, application *object.Application) bool {
+	isUserOfApplication, err := object.IsUserOfApplication(user, application)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return false
+	}
+	if !isUserOfApplication {
+		c.ResponseError(c.T("auth:Unauthorized operation"))
+		return false
+	}
+	return true
+}
+
+func (c *ApiController) checkUserOfApplicationId(user *object.User, applicationId string) bool {
+	application, err := object.GetApplication(applicationId)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return false
+	}
+	if application == nil {
+		c.ResponseError(fmt.Sprintf(c.T("auth:The application: %s does not exist"), applicationId))
+		return false
+	}
+	return c.checkUserOfApplication(user, application)
+}
 func checkMfaEnable(c *ApiController, user *object.User, organization *object.Organization, verificationType string) bool {
 	if user.IsMfaEnabled() && !object.IsMfaRemembered(user, c.Ctx.GetCookie(object.MfaRememberCookieName)) {
 		c.setMfaUserSession(user.GetId())
@@ -756,6 +784,11 @@ func (c *ApiController) Login() {
 				}
 			} else if verificationCodeType == object.VerifyTypeEmail {
 				checkDest = authForm.Username
+			}
+
+			if !object.IsUserVerifyDest(user, checkDest, authForm.CountryCode) {
+				c.ResponseError(fmt.Sprintf(c.T("general:The user: %s doesn't exist"), util.GetId(authForm.Organization, authForm.Username)))
+				return
 			}
 
 			// check result through Email or Phone
@@ -1346,19 +1379,11 @@ func (c *ApiController) Login() {
 				return
 			}
 
-			passed, err := c.checkOrgMasterVerificationCode(user, authForm.Passcode)
+			err = object.VerifyMfaWithLimit(user, func() error { return c.verifyMfaPasscode(user, mfaUtil, authForm.Passcode) }, c.GetAcceptLanguage())
 			if err != nil {
+				c.Ctx.Input.SetParam("recordDetail", object.SigninReasonMfaFailed)
 				c.ResponseError(err.Error())
 				return
-			}
-
-			if !passed {
-				err = mfaUtil.Verify(authForm.Passcode)
-				if err != nil {
-					c.Ctx.Input.SetParam("recordDetail", object.SigninReasonMfaFailed)
-					c.ResponseError(err.Error())
-					return
-				}
 			}
 
 			if authForm.EnableMfaRemember {
@@ -1379,7 +1404,7 @@ func (c *ApiController) Login() {
 			}
 			c.SetSession("verificationCodeType", "")
 		} else if authForm.RecoveryCode != "" {
-			err = object.MfaRecover(user, authForm.RecoveryCode)
+			err = object.VerifyMfaWithLimit(user, func() error { return object.MfaRecover(user, authForm.RecoveryCode) }, c.GetAcceptLanguage())
 			if err != nil {
 				c.Ctx.Input.SetParam("recordDetail", object.SigninReasonMfaFailed)
 				c.ResponseError(err.Error())
@@ -1844,7 +1869,7 @@ func (c *ApiController) DeviceAuthComplete() {
 		return
 	}
 
-	user, err := object.GetUserByFields(application.Organization, deviceAuthCache.UserName)
+	user, err := object.GetUser(deviceAuthCache.UserName)
 	if err != nil {
 		c.ResponseError(err.Error())
 		return

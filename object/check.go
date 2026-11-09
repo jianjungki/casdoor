@@ -607,6 +607,20 @@ func CheckApiPermission(userId string, organization string, path string, method 
 	return false, nil
 }
 
+// IsUserOfApplication reports whether the user may use this application at all.
+// Upstream's IsExternalUser branch is not ported yet.
+func IsUserOfApplication(user *User, application *Application) (bool, error) {
+	if user.IsGlobalAdmin() || user.Owner == application.Organization || application.IsShared {
+		return true, nil
+	}
+
+	organization, err := getOrganization("admin", user.Owner)
+	if err != nil {
+		return false, err
+	}
+	return organization != nil && organization.DefaultApplication == application.Name && application.Organization == "built-in", nil
+}
+
 // CheckApplicationSignin answers whether this user may sign in to this application.
 // Upstream's cross-organization sign-in check and CIMD tag filter are not ported yet.
 func CheckApplicationSignin(application *Application, user *User, clientIp string, lang string) error {
@@ -875,7 +889,21 @@ func CheckUpdateUser(oldUser, user *User, lang string) string {
 			return err.Error()
 		}
 	}
+	if msg := checkUserGroups(oldUser, user, lang); msg != "" {
+		return msg
+	}
 
+	return ""
+}
+
+// checkUserGroups keeps a user out of the groups of other organizations: a group grants the
+// roles and permissions of the organization owning it
+func checkUserGroups(oldUser, user *User, lang string) string {
+	for _, group := range user.Groups {
+		if !util.InSlice(oldUser.Groups, group) && !strings.HasPrefix(group, user.Owner+"/") {
+			return i18n.Translate(lang, "auth:Unauthorized operation")
+		}
+	}
 	return ""
 }
 
