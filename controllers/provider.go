@@ -152,7 +152,7 @@ func (c *ApiController) GetProvider() {
 func (c *ApiController) GetIdpDiscovery() {
 	issuer := c.Ctx.Input.Query("issuer")
 
-	discovery, err := idp.GetOidcDiscovery(issuer)
+	discovery, err := idp.GetOidcDiscoveryByAdmin(issuer, c.IsGlobalAdmin())
 	if err != nil {
 		c.ResponseError(err.Error())
 		return
