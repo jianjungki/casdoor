@@ -434,6 +434,17 @@ func GetImplicitToken(application *Application, username string, password string
 	return mintImplicitToken(application, username, scope, nonce, host)
 }
 
+func getInactiveUserTokenError(user *User) *TokenError {
+	if !user.IsForbidden && !user.IsDeleted {
+		return nil
+	}
+
+	return &TokenError{
+		Error:            InvalidGrant,
+		ErrorDescription: "the user is forbidden to sign in, please contact the administrator",
+	}
+}
+
 // GetJwtBearerToken handles the JWT Bearer Grant flow (RFC 7523).
 func GetJwtBearerToken(application *Application, assertion string, scope string, nonce string, host string) (*Token, *TokenError, error) {
 	ok, claims, err := ValidateJwtAssertion(assertion, application, host)
@@ -569,6 +580,10 @@ func GetWechatMiniProgramToken(application *Application, code string, host strin
 		if err != nil {
 			return nil, nil, err
 		}
+	}
+
+	if tokenError := getInactiveUserTokenError(user); tokenError != nil {
+		return nil, tokenError, nil
 	}
 
 	err = ExtendUserWithRolesAndPermissions(user)
