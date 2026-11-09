@@ -123,6 +123,15 @@ func GetCountryCode(prefix string, phone string) (string, error) {
 	return countryCode, nil
 }
 
+var secretFields = []string{
+	"password", "passwordsalt", "clientsecret", "clientsecret2", "accesssecret", "secretkey",
+	"privatekey", "totpsecret", "recoverycodes", "masterpassword", "masterverificationcode",
+	"defaultpassword", "passwordobfuscatorkey", "sshpassword", "webauthncredentials", "faceids",
+	"refreshtoken", "refreshtokenhash", "idtoken", "idtokenhash", "originaltoken",
+	"originalrefreshtoken", "registrationaccesstoken", "codechallenge", "accesstokenhash",
+	"managedaccounts", "mfaaccounts",
+}
+
 func FilterField(field string) bool {
 	return ReFieldWhiteList.MatchString(field)
 }

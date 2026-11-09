@@ -59,7 +59,7 @@ func GetOAuthToken(grantType string, clientId string, clientSecret string, code 
 		}, nil
 	}
 
-	// Handle WeChat Mini Program flow separately â€?it does not use standard OAuth grant types
+	// Handle WeChat Mini Program flow separately â€”it does not use standard OAuth grant types
 	if tag == "wechat_miniprogram" {
 		token, tokenError, err := GetWechatMiniProgramToken(application, code, host, username, avatar, lang)
 		if err != nil {
