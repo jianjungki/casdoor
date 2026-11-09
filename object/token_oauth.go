@@ -803,6 +803,8 @@ func GetTokenExchangeToken(application *Application, clientSecret string, subjec
 		Scope:        scope,
 		TokenType:    "Bearer",
 		CodeIsUsed:   true,
+		Resource:     audience,
+		GrantType:    "urn:ietf:params:oauth:grant-type:token-exchange",
 	}
 
 	_, err = AddToken(token)
