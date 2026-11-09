@@ -213,19 +213,6 @@ func (c *ApiController) GetSessionApplication() *object.Application {
 	return application
 }
 
-// renewSessionIdForUser gives the pending MFA prompt a fresh session id, so the partial
-// sign-in cannot be replayed against the session id that existed before the prompt.
-func (c *ApiController) renewSessionIdForUser(userId string) {
-	if sessionUser, _ := c.GetSession("username").(string); sessionUser == userId {
-		return
-	}
-
-	err := c.SessionRegenerateID()
-	if err != nil {
-		logs.Error("SessionRegenerateID failed, error: %s", err)
-	}
-}
-
 func (c *ApiController) ClearUserSession() {
 	c.SetSessionUsername("")
 	c.SetSessionData(nil)
@@ -255,6 +242,17 @@ func (c *ApiController) GetSessionOidc() (string, string) {
 		aud = ""
 	}
 	return scope, aud
+}
+
+func (c *ApiController) renewSessionIdForUser(userId string) {
+	if sessionUser, _ := c.GetSession("username").(string); sessionUser == userId {
+		return
+	}
+
+	err := c.SessionRegenerateID()
+	if err != nil {
+		logs.Error("SessionRegenerateID failed, error: %s", err)
+	}
 }
 
 // SetSessionUsername ...
