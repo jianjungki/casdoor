@@ -67,24 +67,23 @@ func (c *ApiController) GetPayments() {
 		c.ResponseOk(payments)
 	} else {
 		limit := util.ParseInt(limit)
+		user := ""
 		if !c.IsAdmin() {
-			user := c.GetSessionUsername()
-			_, userName, userErr := util.GetOwnerAndNameFromIdWithError(user)
+			_, userName, userErr := util.GetOwnerAndNameFromIdWithError(c.GetSessionUsername())
 			if userErr != nil {
 				c.ResponseError(userErr.Error())
 				return
 			}
-			field = "user"
-			value = userName
+			user = userName
 		}
-		count, err := object.GetPaymentCount(owner, field, value)
+		count, err := object.GetPaymentCount(owner, user, field, value)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
 		paginator := pagination.NewPaginator(c.Ctx.Request, limit, count)
-		payments, err := object.GetPaginationPayments(owner, paginator.Offset(), limit, field, value, sortField, sortOrder)
+		payments, err := object.GetPaginationPayments(owner, user, paginator.Offset(), limit, field, value, sortField, sortOrder)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return

@@ -702,6 +702,7 @@ func CheckApplicationSignin(application *Application, user *User, clientIp strin
 	return nil
 }
 
+
 func CheckLoginPermission(userId string, application *Application) (bool, error) {
 	owner, _, err := util.GetOwnerAndNameFromIdWithError(userId)
 	if err != nil {

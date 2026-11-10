@@ -1431,8 +1431,7 @@ func GetUserInfo(user *User, scope string, aud string, host string) (*Userinfo, 
 
 	if strings.Contains(scope, "email") && allowed("Email") {
 		resp.Email = user.Email
-		// resp.EmailVerified = user.EmailVerified
-		resp.EmailVerified = true
+		resp.EmailVerified = user.EmailVerified
 	}
 
 	if strings.Contains(scope, "address") && allowed("Location") {

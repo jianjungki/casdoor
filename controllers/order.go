@@ -67,24 +67,23 @@ func (c *ApiController) GetOrders() {
 		c.ResponseOk(orders)
 	} else {
 		limit := util.ParseInt(limit)
+		user := ""
 		if !c.IsAdmin() {
-			user := c.GetSessionUsername()
-			_, userName, userErr := util.GetOwnerAndNameFromIdWithError(user)
+			_, userName, userErr := util.GetOwnerAndNameFromIdWithError(c.GetSessionUsername())
 			if userErr != nil {
 				c.ResponseError(userErr.Error())
 				return
 			}
-			field = "user"
-			value = userName
+			user = userName
 		}
-		count, err := object.GetOrderCount(owner, field, value)
+		count, err := object.GetOrderCount(owner, user, field, value)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return
 		}
 
 		paginator := pagination.NewPaginator(c.Ctx.Request, limit, count)
-		orders, err := object.GetPaginationOrders(owner, paginator.Offset(), limit, field, value, sortField, sortOrder)
+		orders, err := object.GetPaginationOrders(owner, user, paginator.Offset(), limit, field, value, sortField, sortOrder)
 		if err != nil {
 			c.ResponseError(err.Error())
 			return

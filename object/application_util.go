@@ -661,8 +661,11 @@ func (application *Application) IsMagicLinkSignupEnabled() bool {
 }
 
 func (application *Application) IsSignupAllowedFor(organization string) bool {
+	if organization == "built-in" {
+		return false
+	}
 	if application.IsShared {
-		return organization != "built-in"
+		return true
 	}
 	return organization == application.Organization
 }
