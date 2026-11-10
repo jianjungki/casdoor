@@ -268,7 +268,7 @@ export default function AuthCallback() {
           props: res.data2,
           values: {...body, providerBack: body.provider, provider: ""},
           authParams,
-          onSuccess: (mfaRes: any) => checkMfa(mfaRes, authParams, onDone),
+          onSuccess: onDone,
         });
       } else if (res.data === "SelectPlan") {
         const pricing = res.data2;
@@ -321,11 +321,6 @@ export default function AuthCallback() {
           setMsg(res.msg);
         }
       });
-      return;
-    }
-
-    if (responseType === "link" && !Util.consumeLinkNonce(innerParams.get("linkNonce"))) {
-      setMsg(i18next.t("general:Unauthorized"));
       return;
     }
 

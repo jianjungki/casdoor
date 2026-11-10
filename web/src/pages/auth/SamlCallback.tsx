@@ -127,7 +127,7 @@ export default function SamlCallback() {
           values: {...body, providerBack: body.provider, provider: ""},
           // the same params antd hands MfaAuthVerifyForm, so the re-post keeps the OAuth context
           authParams: {clientId, responseType, redirectUri, state},
-          onSuccess: (mfaRes: any) => checkMfa(mfaRes, onDone),
+          onSuccess: onDone,
         });
       } else if (res.data === "SelectPlan") {
         const pricing = res.data2;

@@ -6,7 +6,6 @@ import {Button} from "@/components/ui/button";
 import {LanguageSelect} from "@/components/common/LanguageSelect";
 import {ThemeToggle} from "@/components/common/ThemeToggle";
 import {CustomHtml, CustomStyle} from "@/components/common/CustomHtml";
-import {getSafeHtml, isTrustedApplication} from "@/lib/custom-html";
 import {
   getOrganizationCookieChrome,
   useApplicationHelmet,
@@ -181,9 +180,8 @@ export function AuthLayout({
   const isPhone = useIsPhone();
   useApplicationHelmet(preview ? null : application);
   // headerHtml is the organization/application chrome, pageHtml is the per-page one
-  const trusted = isTrustedApplication(application);
-  useCustomHead(preview ? undefined : application?.headerHtml, "header", trusted);
-  useCustomHead(preview ? undefined : application?.pageHtml, "page", trusted);
+  useCustomHead(preview ? undefined : application?.headerHtml, "header");
+  useCustomHead(preview ? undefined : application?.pageHtml, "page");
 
   // the backend hands us the organization's branding in cookies so the first
   // paint is already branded, before /api/get-application has come back
@@ -224,7 +222,7 @@ export function AuthLayout({
     application?.logoDark || cookieChrome.logoDark,
     [isDark && !panelIsLight ? "dark" : "light"],
   );
-  const footerHtml = application?.footerHtml;
+  const footerHtml = application?.footerHtml || cookieChrome.footerHtml;
 
   return (
     <div
@@ -281,7 +279,7 @@ export function AuthLayout({
             )}
           >
             {sidePanel ? (
-              <CustomHtml html={application.formSideHtml} trusted={trusted} className="side-image hidden w-[420px] shrink-0 self-stretch lg:block" />
+              <CustomHtml html={application.formSideHtml} className="side-image hidden w-[420px] shrink-0 self-stretch lg:block" />
             ) : null}
             <div
               className={cn(
@@ -329,7 +327,7 @@ export function AuthLayout({
         <footer
           id="footer"
           className="shrink-0 py-6 text-center text-xs text-muted-foreground"
-          dangerouslySetInnerHTML={{__html: getSafeHtml(footerHtml, trusted)}}
+          dangerouslySetInnerHTML={{__html: footerHtml}}
         />
       ) : (
         <footer id="footer" className="shrink-0 py-6 text-center text-xs text-muted-foreground">

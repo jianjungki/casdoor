@@ -9,7 +9,6 @@ import {Avatar, AvatarFallback, AvatarImage} from "@/components/ui/avatar";
 import {Alert, AlertDescription} from "@/components/ui/alert";
 import {Loading} from "@/components/common/Loading";
 import {CustomHtml, CustomStyle} from "@/components/common/CustomHtml";
-import {isTrustedApplication} from "@/lib/custom-html";
 import {AuthDivider, AuthLayout} from "@/components/auth/AuthLayout";
 import {SigninMethodTabs} from "@/components/auth/SigninMethodTabs";
 import {MfaVerify, NextMfa, RequiredMfa} from "@/components/auth/MfaVerify";
@@ -1095,11 +1094,9 @@ export default function LoginPage({type = "login", application: applicationProp,
           mfaProps={mfa.props}
           application={application}
           onSuccess={(res) =>
-            checkMfa(res, mfa.values, mfa.authParams, (doneRes) =>
-              type === "cas"
-                ? handleCasLoginResult(doneRes, mfa.authParams)
-                : handleLoginResult(doneRes, mfa.values, mfa.authParams),
-            )
+            type === "cas"
+              ? handleCasLoginResult(res, mfa.authParams)
+              : handleLoginResult(res, mfa.values, mfa.authParams)
           }
         />
       </AuthLayout>
@@ -1194,7 +1191,7 @@ export default function LoginPage({type = "login", application: applicationProp,
 
   // The whole page can be replaced by the application's own markup.
   if (application.signinHtml) {
-    return <CustomHtml html={application.signinHtml} trusted={isTrustedApplication(application)} />;
+    return <CustomHtml html={application.signinHtml} />;
   }
 
   const signinItems = (application.signinItems ?? []) as any[];
@@ -1244,7 +1241,7 @@ export default function LoginPage({type = "login", application: applicationProp,
   const renderSigninItem = (item: any) => {
     const key = item.name;
     if (Setting.isCustomFormItem(item)) {
-      return item.visible ? <CustomHtml key={key} html={item.customCss} trusted={isTrustedApplication(application)} /> : null;
+      return item.visible ? <CustomHtml key={key} html={item.customCss} /> : null;
     }
     // the antd page keeps the auto sign-in checkbox even when the link is hidden
     if (!item.visible && item.name !== "Forgot password?") {

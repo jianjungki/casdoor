@@ -13,7 +13,6 @@ import {PasswordInput} from "@/components/common/PasswordInput";
 import {SearchableSelect} from "@/components/common/SearchableSelect";
 import {RegionSelect} from "@/components/common/RegionSelect";
 import {CustomHtml, CustomStyle} from "@/components/common/CustomHtml";
-import {isTrustedApplication} from "@/lib/custom-html";
 import {AuthDivider, AuthLayout} from "@/components/auth/AuthLayout";
 import {AgreementCheckbox, getAgreementDefaultValue} from "@/components/auth/AgreementModal";
 import {ProviderButtons, getVisibleProviders} from "@/components/auth/ProviderButtons";
@@ -474,7 +473,7 @@ export default function SignupPage({application: applicationProp}: {application?
   const renderItem = (item: any) => {
     if (Setting.isCustomFormItem(item)) {
       // a "Text N" item is raw HTML, kept in the label by the application editor
-      return <CustomHtml key={item.name} html={item.label} trusted={isTrustedApplication(application)} />;
+      return <CustomHtml key={item.name} html={item.label} />;
     }
 
     switch (item.name) {
@@ -655,7 +654,7 @@ export default function SignupPage({application: applicationProp}: {application?
 
   // The whole page can be replaced by the application's own markup.
   if (application.signupHtml) {
-    return <CustomHtml html={application.signupHtml} trusted={isTrustedApplication(application)} />;
+    return <CustomHtml html={application.signupHtml} />;
   }
 
   // an application that lists no signup button at all still gets the default one

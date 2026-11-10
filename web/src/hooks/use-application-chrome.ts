@@ -2,7 +2,6 @@ import * as React from "react";
 import * as Cookie from "cookie";
 import * as Conf from "@/Conf";
 import {useTheme} from "@/hooks/use-theme";
-import {getSafeHtml} from "@/lib/custom-html";
 import * as Setting from "@/lib/setting";
 
 interface ThemeData {
@@ -170,13 +169,15 @@ function readCookie(name: string): string | undefined {
   }
 }
 
-/** The logo the backend put in a cookie, used until the application loads. */
+/** The logo/footer the backend put in a cookie, used until the application loads. */
 export function getOrganizationCookieChrome() {
   const logo = readCookie("organizationLogo");
   const logoDark = readCookie("organizationLogoDark");
+  const footerHtml = readCookie("organizationFootHtml");
   return {
     logo: logo ? logo : undefined,
     logoDark: logoDark ? logoDark : undefined,
+    footerHtml: footerHtml ? footerHtml : undefined,
   };
 }
 
@@ -256,26 +257,25 @@ const customHeadLoadedIds = new Set<string>();
 
 /**
  * Appends an application's custom HTML (`headerHtml` / `pageHtml`) to <head>,
- * re-creating <script> nodes of trusted applications so the browser actually
- * executes them. Port of web/src/basic/CustomHead.js — like it, each id is
- * injected only once per page load, since the injected markup is not tracked for
- * removal.
+ * re-creating <script> nodes so the browser actually executes them. Port of
+ * web/src/basic/CustomHead.js — like it, each id is injected only once per page
+ * load, since the injected markup is not tracked for removal.
  */
-export function useCustomHead(html: string | undefined | null, id = "default", trusted = false) {
+export function useCustomHead(html: string | undefined | null, id = "default") {
   React.useEffect(() => {
     if (!html || customHeadLoadedIds.has(id)) {
       return;
     }
 
     const container = document.createElement("div");
-    container.innerHTML = getSafeHtml(html, trusted);
+    container.innerHTML = html;
 
     Array.from(container.childNodes).forEach((node) => {
       if (node.nodeType !== Node.ELEMENT_NODE) {
         return;
       }
       let element = node as Element;
-      if (trusted && element.localName === "script") {
+      if (element.localName === "script") {
         const script = document.createElement("script");
         Array.from(element.attributes).forEach((attr) => script.setAttribute(attr.name, attr.value));
         script.text = element.textContent ?? "";
@@ -286,5 +286,5 @@ export function useCustomHead(html: string | undefined | null, id = "default", t
     });
 
     customHeadLoadedIds.add(id);
-  }, [html, id, trusted]);
+  }, [html, id]);
 }

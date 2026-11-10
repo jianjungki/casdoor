@@ -249,7 +249,7 @@ export function ApplicationProvidersTab({
               render: (row: any, _i, patch) =>
                 LINKABLE_PROVIDER_CATEGORIES.includes(resolveProvider(row)?.category) ? (
                   <MultiSelect
-                    value={row.bindingRule ?? ["Email", "Phone"]}
+                    value={row.bindingRule?.length ? row.bindingRule : ["Email", "Phone", "Name"]}
                     onChange={(v) => patch({bindingRule: v})}
                     options={enumOptions(PROVIDER_BINDING_RULES)}
                   />
