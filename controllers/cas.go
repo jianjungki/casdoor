@@ -50,10 +50,10 @@ func (c *RootController) CasValidate() {
 		c.Ctx.Output.Body([]byte("no\n"))
 		return
 	}
-	if ok, response, issuedService, _ := object.GetCasTokenByTicket(ticket); ok {
+	if wrapper := object.GetCasTokenByTicket(ticket); wrapper != nil {
 		// check whether service is the one for which we previously issued token
-		if issuedService == service {
-			c.Ctx.Output.Body([]byte(fmt.Sprintf("yes\n%s\n", response.User)))
+		if wrapper.Service == service {
+			c.Ctx.Output.Body([]byte(fmt.Sprintf("yes\n%s\n", wrapper.AuthenticationSuccess.User)))
 			return
 		}
 	}
@@ -102,9 +102,12 @@ func (c *RootController) CasP3ProxyValidate() {
 		c.sendCasAuthenticationResponseErr(InvalidRequest, "service and ticket must exist", format)
 		return
 	}
-	ok, response, issuedService, userId := object.GetCasTokenByTicket(ticket)
+	wrapper := object.GetCasTokenByTicket(ticket)
+	userId := ""
 	// find the token
-	if ok {
+	if wrapper != nil {
+		response, issuedService := wrapper.AuthenticationSuccess, wrapper.Service
+		userId = wrapper.UserId
 		// check whether service is the one for which we previously issued token
 		if strings.HasPrefix(service, issuedService) || strings.HasPrefix(queryUnescape(service), issuedService) {
 			serviceResponse.Success = response
@@ -205,7 +208,7 @@ func (c *RootController) CasProxy() {
 		newAuthenticationSuccess.Proxies = &object.CasProxies{}
 	}
 	newAuthenticationSuccess.Proxies.Proxies = append(newAuthenticationSuccess.Proxies.Proxies, issuedService)
-	proxyTicket := object.StoreCasTokenForProxyTicket(&newAuthenticationSuccess, targetService, userId)
+	proxyTicket := object.StoreCasTokenForProxyTicket(&newAuthenticationSuccess, targetService, userId, "")
 
 	serviceResponse := object.CasServiceResponse{
 		Xmlns: "http://www.yale.edu/tp/cas",

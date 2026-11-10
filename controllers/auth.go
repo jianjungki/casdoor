@@ -352,7 +352,7 @@ func (c *ApiController) HandleLoggedIn(application *object.Application, user *ob
 				return
 			}
 
-			st, err := object.GenerateCasToken(userId, service)
+			st, err := object.GenerateCasToken(userId, service, application.Name)
 			if err != nil {
 				resp = wrapErrorResponse(err)
 			} else {

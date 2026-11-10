@@ -100,6 +100,8 @@ type CasAuthenticationSuccessWrapper struct {
 	AuthenticationSuccess *CasAuthenticationSuccess // the token we issued
 	Service               string                    // to which service this token is issued
 	UserId                string
+	Application           string
+	IssuedTime            time.Time
 }
 
 type CasProxySuccess struct {
@@ -131,6 +133,27 @@ var stToServiceResponse sync.Map
 
 // pgt is short for proxy granting ticket
 var pgtToServiceResponse sync.Map
+
+const casTicketTimeout = 5 * time.Minute
+
+func isCasTicketExpired(wrapper *CasAuthenticationSuccessWrapper) bool {
+	return time.Since(wrapper.IssuedTime) > casTicketTimeout
+}
+
+func InitCleanupCasTickets() {
+	util.SafeGoroutine(func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			stToServiceResponse.Range(func(key, value any) bool {
+				if isCasTicketExpired(value.(*CasAuthenticationSuccessWrapper)) {
+					stToServiceResponse.Delete(key)
+				}
+				return true
+			})
+		}
+	})
+}
 
 func CheckCasLogin(application *Application, lang string, service string) error {
 	if len(application.RedirectUris) > 0 && !application.IsRedirectUriValid(service) {
@@ -168,27 +191,28 @@ func GetCasTokenByPgt(pgt string) (bool, *CasAuthenticationSuccess, string, stri
 	return false, nil, "", ""
 }
 
-// GetCasTokenByTicket
-/**
-@ret1: whether a token is found
-@ret2: token, nil if not found
-@ret3: the service URL who requested to issue this token
-@ret4: userIf of user who requested to issue this token
-*/
-func GetCasTokenByTicket(ticket string) (bool, *CasAuthenticationSuccess, string, string) {
-	if responseWrapperType, ok := stToServiceResponse.LoadAndDelete(ticket); ok {
-		responseWrapperTypeCast := responseWrapperType.(*CasAuthenticationSuccessWrapper)
-		return true, responseWrapperTypeCast.AuthenticationSuccess, responseWrapperTypeCast.Service, responseWrapperTypeCast.UserId
+// GetCasTokenByTicket returns the token of the service or proxy ticket, nil if not found
+func GetCasTokenByTicket(ticket string) *CasAuthenticationSuccessWrapper {
+	responseWrapperType, ok := stToServiceResponse.LoadAndDelete(ticket)
+	if !ok {
+		return nil
 	}
-	return false, nil, "", ""
+
+	wrapper := responseWrapperType.(*CasAuthenticationSuccessWrapper)
+	if isCasTicketExpired(wrapper) {
+		return nil
+	}
+	return wrapper
 }
 
-func StoreCasTokenForProxyTicket(token *CasAuthenticationSuccess, targetService, userId string) string {
+func StoreCasTokenForProxyTicket(token *CasAuthenticationSuccess, targetService, userId string, application string) string {
 	proxyTicket := fmt.Sprintf("PT-%s", util.GenerateId())
 	stToServiceResponse.Store(proxyTicket, &CasAuthenticationSuccessWrapper{
 		AuthenticationSuccess: token,
 		Service:               targetService,
 		UserId:                userId,
+		Application:           application,
+		IssuedTime:            time.Now(),
 	})
 	return proxyTicket
 }
@@ -202,7 +226,7 @@ func escapeXMLText(input string) (string, error) {
 	return sb.String(), nil
 }
 
-func GenerateCasToken(userId string, service string) (string, error) {
+func GenerateCasToken(userId string, service string, application string) (string, error) {
 	user, err := GetUser(userId)
 	if err != nil {
 		return "", err
@@ -278,6 +302,8 @@ func GenerateCasToken(userId string, service string) (string, error) {
 		AuthenticationSuccess: &authenticationSuccess,
 		Service:               service,
 		UserId:                userId,
+		Application:           application,
+		IssuedTime:            time.Now(),
 	})
 	return st, nil
 }
@@ -300,11 +326,11 @@ func GetValidationBySaml(samlRequest string, host string) (string, string, error
 		return "", "", fmt.Errorf("request.AssertionArtifact.InnerXML error, AssertionArtifact field not found")
 	}
 
-	ok, _, service, userId := GetCasTokenByTicket(ticket)
-	if !ok {
+	wrapper := GetCasTokenByTicket(ticket)
+	if wrapper == nil {
 		return "", "", fmt.Errorf("the CAS token for ticket %s is not found", ticket)
 	}
-
+	service, userId := wrapper.Service, wrapper.UserId
 	user, err := GetUser(userId)
 	if err != nil {
 		return "", "", err
