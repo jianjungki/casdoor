@@ -146,7 +146,7 @@ func (p *DatabaseSyncerProvider) InitAdapter() error {
 
 	var db *sql.DB
 
-	if p.Syncer.SshType != "" && (p.Syncer.DatabaseType == "mysql" || p.Syncer.DatabaseType == "postgres" || p.Syncer.DatabaseType == "mssql") {
+	if p.Syncer.isSshTunneled() {
 		var dial *ssh.Client
 		var sshHostKey string
 		if p.Syncer.SshType == "password" {
